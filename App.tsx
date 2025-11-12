@@ -450,7 +450,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen text-white font-sans flex flex-col items-center p-4 sm:p-8 relative">
         <header className="w-full max-w-6xl mx-auto flex justify-between items-center mb-4">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-red-500 to-red-400 text-transparent bg-clip-text tracking-tight cursor-pointer" onClick={hardReset}>SpotFinder AI</h1>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-red-500 to-red-400 text-transparent bg-clip-text tracking-tight cursor-pointer" onClick={hardReset}>SpotFinder KI</h1>
             <div>
                 {currentUser ? (
                     <div className="flex items-center gap-4">
