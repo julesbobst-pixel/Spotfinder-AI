@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PhotoSpot Finder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      :root {
+        --color-primary: 219 39 119;      /* fuchsia-600 */
+        --color-primary-focus: 190 24 93; /* fuchsia-700 */
+        --color-accent: 34 211 238;       /* cyan-400 */
+        --color-accent-focus: 20 184 219;  /* cyan-500 */
+        --font-sans: 'Inter', sans-serif;
+        --bg-dark: 2 6 23;                /* slate-950 */
+        --bg-light: 15 23 42;             /* slate-900 */
+        --border-color: rgba(var(--color-accent), 0.2);
+        --text-primary: 226 232 240;      /* slate-200 */
+        --text-secondary: 148 163 184;    /* slate-400 */
+      }
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+      
+      @keyframes background-pan {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+
+      @keyframes glow-pulse {
+        0%, 100% { box-shadow: 0 0 10px rgba(var(--color-primary), 0.6), 0 0 15px rgba(var(--color-primary), 0.4); }
+        50% { box-shadow: 0 0 15px rgba(var(--color-primary), 0.8), 0 0 25px rgba(var(--color-primary), 0.5); }
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background-color: rgb(var(--bg-dark));
+        color: rgb(var(--text-primary));
+        background-image: 
+          radial-gradient(circle at 1% 1%, rgba(var(--color-primary), 0.2), transparent 30%),
+          radial-gradient(circle at 99% 99%, rgba(var(--color-accent), 0.2), transparent 40%);
+        background-size: 200% 200%;
+        background-attachment: fixed;
+        position: relative;
+        z-index: 1;
+        animation: background-pan 30s infinite ease-in-out;
+      }
+
+      /* Add a subtle grid pattern overlay */
+      body::before {
+        content: '';
+        position: fixed;
+        top: 0; left: 0;
+        width: 100vw;
+        height: 100vh;
+        background-image: 
+          linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+          linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px);
+        background-size: 2.5rem 2.5rem;
+        opacity: 0.8;
+        z-index: -1;
+      }
+
+      .futuristic-border {
+        border: 1px solid var(--border-color);
+        box-shadow: 0 0 10px rgba(var(--color-accent), 0.1), inset 0 0 8px rgba(var(--color-accent), 0.1);
+        transition: border-color 0.3s, box-shadow 0.3s;
+      }
+      
+      .futuristic-bg {
+        background-color: rgba(var(--bg-light), 0.5);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+      
+      .btn-primary-glow {
+        animation: glow-pulse 2.5s infinite ease-in-out;
+        transition: box-shadow 0.3s;
+      }
+      .btn-primary-glow:hover {
+         animation-play-state: paused;
+         box-shadow: 0 0 15px rgba(var(--color-primary), 0.8), 0 0 25px rgba(var(--color-primary), 0.5);
+      }
+
+      /* --- TailwindCSS Overrides --- */
+      /* Text Colors */
+      .text-white { color: rgb(var(--text-primary)); }
+      .text-gray-200 { color: rgb(var(--text-primary)); }
+      .text-gray-300 { color: rgb(var(--text-secondary)); }
+      .text-gray-400 { color: #94a3b8; } /* slate-400 */
+      .text-gray-500 { color: #64748b; } /* slate-500 */
+      
+      /* Primary Color (replaces red) */
+      .bg-red-500, .bg-red-600 { background-color: rgb(var(--color-primary)); }
+      .hover\:bg-red-700:hover { background-color: rgb(var(--color-primary-focus)); }
+      .text-red-400 { color: rgb(var(--color-primary)); }
+      .text-red-500 { color: rgb(var(--color-primary)); }
+      .border-red-500 { border-color: rgb(var(--color-primary)); }
+      .accent-red-500 { accent-color: rgb(var(--color-primary)); }
+      .bg-red-500\/20 { background-color: rgba(var(--color-primary), 0.2); }
+      .hover\:border-red-500:hover { border-color: rgb(var(--color-primary)); }
+      .hover\:border-red-500\/50:hover { border-color: rgba(var(--color-primary), 0.5); }
+      .hover\:shadow-red-500\/10:hover { box-shadow: 0 0 15px rgba(var(--color-primary), 0.1); }
+      .focus\:ring-red-500:focus { --tw-ring-color: rgb(var(--color-primary)); }
+
+      /* Accent Color (for gradients) */
+      .from-red-500 { --tw-gradient-from: rgb(var(--color-primary)) var(--tw-gradient-from-position); --tw-gradient-to: rgba(219, 39, 119, 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+      .to-red-400 { --tw-gradient-to: rgb(var(--color-accent)) var(--tw-gradient-to-position); }
+
+      /* Background Colors */
+      .bg-gray-900 { background-color: transparent; } /* Use body bg */
+      .bg-gray-800 { background-color: rgb(var(--bg-light)); }
+      .bg-gray-700 { background-color: rgba(var(--bg-light), 0.7); }
+      .bg-gray-600 { background-color: rgba(var(--bg-light), 0.4); }
+
+      /* Border Colors */
+      .border-gray-500 { border-color: rgba(var(--text-secondary), 0.4); }
+      .border-gray-600 { border-color: rgba(var(--text-secondary), 0.25); }
+      .border-gray-700 { border-color: rgba(var(--text-secondary), 0.15); }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.29.0",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="text-white">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

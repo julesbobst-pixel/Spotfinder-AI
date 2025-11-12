@@ -1,0 +1,7 @@
+{
+  "name": "PhotoSpot Finder",
+  "description": "An app to help photographers find new, high-quality photo spots in their immediate vicinity based on their specific preferences for subject, style, and time of day, including a precise weather forecast.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
