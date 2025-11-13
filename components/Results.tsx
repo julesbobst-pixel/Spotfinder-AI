@@ -1,55 +1,33 @@
-
 import React, { useState } from 'react';
-import { PhotoSpot, Coordinates, User, UserData, ImageState } from '../types';
+import { PhotoSpot, Coordinates, User, UserData } from '../types';
 import SpotCard from './SpotCard';
-import { SparklesIcon } from './icons/CardIcons';
+import MapModal from './MapModal'; // New component for the map
+import { MapIcon } from './icons/CardIcons';
 
 interface ResultsProps {
   spots: PhotoSpot[];
   userLocation: Coordinates;
   resetSearch: () => void;
-  onRemix: () => void;
-  currentUser: User;
+  currentUser: User | null;
   userData: UserData;
   onToggleFavorite: (spot: PhotoSpot) => void;
-  onToggleVisited: (spot: PhotoSpot) => void;
-  imageStates: { [spotId: string]: ImageState };
-  onLoadImage: (spotId: string, spotName: string, description: string) => void;
-  isOffline: boolean;
+  onToggleVisited: (spotId: string) => void;
+  onSpotSelect: (spot: PhotoSpot) => void;
 }
 
-const Results: React.FC<ResultsProps> = ({ 
-  spots, userLocation, resetSearch, onRemix, currentUser, userData, onToggleFavorite, onToggleVisited, imageStates, onLoadImage, isOffline
-}) => {
-  const [expandedSpotId, setExpandedSpotId] = useState<string | null>(null);
-
-  const handleToggleExpand = (spot: PhotoSpot) => {
-    const { id, name, description } = spot;
-    const isOpening = expandedSpotId !== id;
-    const newExpandedId = isOpening ? id : null;
-    setExpandedSpotId(newExpandedId);
-
-    // Load image only when expanding for the first time
-    if (isOpening && !imageStates[id]) {
-      onLoadImage(id, name, description);
-    }
-  };
-
+const Results: React.FC<ResultsProps> = ({ spots, userLocation, resetSearch, currentUser, userData, onToggleFavorite, onToggleVisited, onSpotSelect }) => {
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false);
+  
   return (
     <div className="w-full">
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <h2 className="text-2xl font-bold sm:text-3xl">Deine Top-Spots</h2>
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={() => { navigator.vibrate?.(50); onRemix(); }} 
-            title={isOffline ? "Du musst online sein für neue Vorschläge" : "Neue Spots mit den gleichen Kriterien finden"}
-            disabled={isOffline}
-            className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-              <SparklesIcon className="w-5 h-5 text-primary-400" />
-              Neue Vorschläge
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-3xl font-bold">Deine Top-Spots</h2>
+        <div className="flex items-center gap-4">
+          <button onClick={() => setIsMapModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600/80 text-white rounded-lg hover:bg-blue-700/80 transition-all">
+            <MapIcon className="w-5 h-5"/>
+            Alle auf der Karte anzeigen
           </button>
-          <button onClick={() => { navigator.vibrate?.(50); resetSearch(); }} className="px-4 py-2 bg-gray-700/50 border border-gray-600 text-white rounded-lg hover:bg-gray-600/50 transition-all">
+          <button onClick={resetSearch} className="px-4 py-2 bg-gray-700/50 border border-gray-600 text-white rounded-lg hover:bg-gray-600/50 transition-all">
             Neue Suche
           </button>
         </div>
@@ -58,7 +36,7 @@ const Results: React.FC<ResultsProps> = ({
       <div className="space-y-6">
         {spots.map((spot) => {
           const isFavorite = userData.favorites.some(fav => fav.id === spot.id);
-          const isVisited = userData.visited.some(s => s.id === spot.id);
+          const isVisited = userData.visited.includes(spot.id);
 
           return (
             <SpotCard 
@@ -70,13 +48,18 @@ const Results: React.FC<ResultsProps> = ({
               isVisited={isVisited}
               onToggleFavorite={onToggleFavorite}
               onToggleVisited={onToggleVisited}
-              isExpanded={spot.id === expandedSpotId}
-              onToggleExpand={() => handleToggleExpand(spot)}
-              imageState={imageStates[spot.id]}
+              onSelect={onSpotSelect}
             />
           )
         })}
       </div>
+
+      {isMapModalOpen && (
+        <MapModal 
+          spots={spots}
+          onClose={() => setIsMapModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

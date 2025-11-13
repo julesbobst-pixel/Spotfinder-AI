@@ -1,90 +1,55 @@
 
 import React, { useState, useEffect } from 'react';
-import { Coordinates, GeocodedLocation } from '../types';
+import { SearchCriteria, Coordinates } from '../types';
 import { geocodeLocation, reverseGeocode } from '../services/geminiService';
-import { ClockIcon, LocationMarkerIcon } from './icons/CardIcons';
 
 interface Step2LocationProps {
-  radius: number;
-  onRadiusChange: (radius: number) => void;
+  criteria: SearchCriteria;
+  setCriteria: React.Dispatch<React.SetStateAction<SearchCriteria>>;
   setUserLocation: (location: Coordinates | null) => void;
   maxRadius: number;
-  isOffline: boolean;
 }
 
-const LAST_LOCATION_KEY = 'spotfinder_last_location';
-
-const Step2Location: React.FC<Step2LocationProps> = ({ radius, onRadiusChange, setUserLocation, maxRadius, isOffline }) => {
+const Step2Location: React.FC<Step2LocationProps> = ({ criteria, setCriteria, setUserLocation, maxRadius }) => {
   const [locationStatus, setLocationStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [statusMessage, setStatusMessage] = useState('Wir brauchen deinen Standort, um Spots in der Nähe zu finden.');
+  const [errorMsg, setErrorMsg] = useState('');
   
   const [manualInput, setManualInput] = useState('');
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [lastUsedLocation, setLastUsedLocation] = useState<GeocodedLocation | null>(null);
+  const [resolvedLocationName, setResolvedLocationName] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem(LAST_LOCATION_KEY);
-    if (saved) {
-      try {
-        setLastUsedLocation(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse last location", e);
-        localStorage.removeItem(LAST_LOCATION_KEY);
-      }
+    // Fix: Replaced NodeJS.Timeout with number for browser compatibility.
+    let timer: number;
+    if (resolvedLocationName) {
+      timer = setTimeout(() => {
+        setResolvedLocationName(null);
+      }, 4000);
     }
-  }, []);
-
-  const saveLastLocation = (location: GeocodedLocation) => {
-    localStorage.setItem(LAST_LOCATION_KEY, JSON.stringify(location));
-    setLastUsedLocation(location);
-  };
-
-  const handleUseLastLocation = () => {
-    if (!lastUsedLocation) return;
-    setUserLocation({ lat: lastUsedLocation.lat, lon: lastUsedLocation.lon });
-    setLocationStatus('success');
-    setStatusMessage(`Zuletzt verwendeter Ort: ${lastUsedLocation.name}`);
-  };
+    return () => clearTimeout(timer);
+  }, [resolvedLocationName]);
 
   const handleLocationClick = () => {
     setLocationStatus('loading');
-    setStatusMessage('Standort wird abgerufen...');
+    setErrorMsg('');
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
         const coords = { lat: latitude, lon: longitude };
         setUserLocation(coords);
-        setStatusMessage('Ortsname wird ermittelt...');
         try {
             const name = await reverseGeocode(coords);
-            const geocodedLocation = { ...coords, name };
-            saveLastLocation(geocodedLocation);
-            setStatusMessage(`Standort gefunden: ${name}`);
-            setLocationStatus('success');
+            setResolvedLocationName(name);
         } catch (e) {
             console.error("Reverse geocoding failed, but location is set.", e)
-            setStatusMessage('Standort erfasst! Name konnte nicht ermittelt werden.');
-            setLocationStatus('success');
         }
+        setLocationStatus('success');
       },
       (error) => {
-        let msg = 'Standort konnte nicht abgerufen werden.';
-        switch(error.code) {
-          case error.PERMISSION_DENIED:
-            msg = 'Du hast den Zugriff auf deinen Standort verweigert. Bitte gib ihn in den Browsereinstellungen frei oder gib den Ort manuell ein.';
-            break;
-          case error.POSITION_UNAVAILABLE:
-            msg = 'Standortinformationen sind nicht verfügbar. Versuche es erneut oder gib den Ort manuell ein.';
-            break;
-          case error.TIMEOUT:
-            msg = 'Die Anfrage nach dem Standort hat zu lange gedauert. Versuche es erneut.';
-            break;
-        }
-        setStatusMessage(msg);
+        setErrorMsg('Standort konnte nicht abgerufen werden. Bitte Berechtigung erteilen oder Ort manuell eingeben.');
         setLocationStatus('error');
         setUserLocation(null);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      }
     );
   };
   
@@ -93,101 +58,104 @@ const Step2Location: React.FC<Step2LocationProps> = ({ radius, onRadiusChange, s
       if (!manualInput.trim()) return;
       
       setIsGeocoding(true);
-      setStatusMessage('');
+      setErrorMsg('');
       try {
           const result = await geocodeLocation(manualInput);
           setUserLocation({ lat: result.lat, lon: result.lon });
-          setStatusMessage(`Standort gefunden: ${result.name}`);
+          setResolvedLocationName(result.name);
           setLocationStatus('success');
-          saveLastLocation(result);
       } catch (err: any) {
-          setStatusMessage(err.message || "Ort konnte nicht gefunden werden.");
+          setErrorMsg(err.message || "Ort konnte nicht gefunden werden.");
           setLocationStatus('error');
       } finally {
           setIsGeocoding(false);
       }
   }
   
-  const getStatusColor = () => {
+  const getButtonText = () => {
     switch(locationStatus) {
-      case 'success': return 'text-green-400';
-      case 'error': return 'text-red-400';
-      case 'loading': return 'text-yellow-400';
-      default: return 'text-gray-400';
+        case 'loading': return 'Standort wird ermittelt...';
+        case 'success': return 'Standort erfasst!';
+        default: return 'Meinen aktuellen Standort verwenden';
     }
   }
 
   return (
-    <div className="flex flex-col items-center w-full">
-      <h2 className="text-3xl font-bold mb-4 text-center">Wo befindest du dich?</h2>
-      <div className={`w-full max-w-md text-center text-sm mb-6 h-10 flex items-center justify-center transition-colors ${getStatusColor()}`}>
-        <p>{isOffline ? "Du bist offline. Standortsuche nicht verfügbar." : statusMessage}</p>
-      </div>
+    <div className="flex flex-col items-center w-full relative">
+      <h2 className="text-2xl font-semibold mb-4 text-center">Wo befindest du dich?</h2>
+      <p className="text-center text-gray-400 mb-6">Wir brauchen deinen Standort, um Spots in der Nähe zu finden.</p>
 
-      <div className="w-full max-w-sm flex flex-col sm:flex-row gap-4">
-        {lastUsedLocation && (
-          <button
-            onClick={handleUseLastLocation}
-            className="w-full px-4 py-3 text-base font-semibold rounded-lg transition-all flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 border border-gray-600"
-          >
-            <ClockIcon className="w-5 h-5" />
-            Zuletzt: {lastUsedLocation.name}
-          </button>
+      <div className="w-full max-w-sm relative">
+        {resolvedLocationName && (
+            <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-max bg-green-800/80 backdrop-blur-sm text-white text-sm font-semibold px-4 py-2 rounded-lg border border-green-600 shadow-lg animate-fade-in-out">
+                Standort gefunden: {resolvedLocationName} ✓
+            </div>
         )}
         <button
             onClick={handleLocationClick}
-            disabled={locationStatus === 'loading' || isOffline}
-            className={`w-full px-6 py-3 text-lg font-semibold rounded-lg transition-all flex items-center justify-center
-            ${locationStatus === 'success' ? 'bg-green-600 hover:bg-green-700' : 'bg-primary-600 hover:bg-primary-700'}
-            disabled:bg-gray-600 disabled:cursor-wait`}
+            disabled={locationStatus === 'loading'}
+            className={`w-full px-6 py-3 text-lg font-semibold rounded-lg transition-colors flex items-center justify-center
+            ${locationStatus === 'success' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}
+            disabled:bg-gray-500 disabled:cursor-wait`}
         >
-            {locationStatus === 'loading' ? <SpinnerIcon /> : <><LocationMarkerIcon className="w-6 h-6 mr-2" /> Meinen Standort verwenden</>}
+            {locationStatus === 'loading' && <SpinnerIcon />}
+            {getButtonText()}
         </button>
       </div>
 
       <div className="w-full max-w-sm mt-6 text-center">
         <div className="relative flex py-2 items-center">
-          <div className="flex-grow border-t border-gray-700"></div>
+          <div className="flex-grow border-t border-gray-600"></div>
           <span className="flex-shrink mx-4 text-gray-400 text-sm">oder</span>
-          <div className="flex-grow border-t border-gray-700"></div>
+          <div className="flex-grow border-t border-gray-600"></div>
         </div>
+        <p className="text-gray-300 mb-3 text-sm font-semibold">Korrigiere den Standort oder gib ihn manuell ein:</p>
         <form onSubmit={handleManualSubmit} className="flex gap-2">
             <input
                 type="text"
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
-                placeholder="PLZ, Stadt oder Adresse eingeben"
-                className="flex-grow shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 border-gray-600 text-white leading-tight focus:outline-none focus:ring-2 focus:ring-primary-500"
-                disabled={isOffline}
+                placeholder="PLZ, Stadt oder Adresse"
+                className="flex-grow shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 border-gray-600 text-white leading-tight focus:outline-none focus:ring-2 focus:ring-red-500"
             />
             <button 
                 type="submit" 
-                disabled={isGeocoding || !manualInput || isOffline}
+                disabled={isGeocoding || !manualInput}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
             >
                 {isGeocoding ? <SpinnerIcon /> : 'Suchen'}
             </button>
         </form>
+         {errorMsg && <p className="text-red-400 mt-2 text-sm">{errorMsg}</p>}
       </div>
 
-      <div className="w-full max-w-md mt-10">
+      <div className="w-full max-w-md mt-8">
         <label htmlFor="radius-slider" className="block mb-2 font-medium text-center">
-          Umkreis: <span className="font-bold text-primary-400 text-xl">{radius} km</span>
+          Umkreis: <span className="font-bold text-red-400">{criteria.radius} km</span>
         </label>
         <input
           id="radius-slider"
           type="range"
           min="1"
           max={maxRadius}
-          value={radius}
-          onChange={(e) => onRadiusChange(parseInt(e.target.value, 10))}
-          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+          value={criteria.radius}
+          onChange={(e) => setCriteria(prev => ({ ...prev, radius: parseInt(e.target.value, 10) }))}
+          className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-red-500"
         />
         <div className="flex justify-between text-xs text-gray-400 px-1 mt-1">
           <span>1 km</span>
           <span>{maxRadius} km</span>
         </div>
       </div>
+      <style>{`
+        @keyframes fade-in-out {
+          0%, 100% { opacity: 0; transform: translateY(-10px) translateX(-50%); }
+          10%, 90% { opacity: 1; transform: translateY(0) translateX(-50%); }
+        }
+        .animate-fade-in-out {
+          animation: fade-in-out 4s ease-in-out forwards;
+        }
+      `}</style>
     </div>
   );
 };

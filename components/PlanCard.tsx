@@ -19,7 +19,7 @@ const PlanCard: React.FC<PlanCardProps> = ({ plan, onDelete }) => {
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div>
-          <h4 className="font-bold text-lg text-primary-400">{plan.title}</h4>
+          <h4 className="font-bold text-lg text-red-400">{plan.title}</h4>
           <p className="text-sm text-gray-400 flex items-center">
             <LocationMarkerIcon className="w-4 h-4 mr-1.5" />
             {plan.spot.name}
@@ -33,7 +33,7 @@ const PlanCard: React.FC<PlanCardProps> = ({ plan, onDelete }) => {
                         onDelete(plan.id);
                     }
                 }} 
-                className="text-gray-500 hover:text-primary-500 text-xs font-semibold px-3 py-1 bg-gray-700 rounded-md transition-colors"
+                className="text-gray-500 hover:text-red-500 text-xs font-semibold px-3 py-1 bg-gray-700 rounded-md transition-colors"
             >
                 Löschen
             </button>
