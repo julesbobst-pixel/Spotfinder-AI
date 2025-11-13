@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { SearchCriteria, Coordinates, PhotoSpot, User, UserData, PhotoshootPlan, PlannerCriteria, ImageState } from './types';
 import { findPhotoSpots, generatePhotoshootPlan, geocodeLocation, generateSpotImage } from './services/geminiService';
@@ -12,8 +13,7 @@ import Step4Time from './components/Step4Time';
 import LoadingSpinner from './components/LoadingSpinner';
 import Results from './components/Results';
 import Profile from './components/Profile';
-// FIX: Changed to a named import as PlannerWizard does not have a default export.
-import { PlannerWizard } from './components/PlannerWizard';
+import PlannerWizard from './components/PlannerWizard';
 import PlanningResult from './components/PlanningResult';
 // Fix: Changed import to a named import as the error indicates no default export was found.
 import { AddSpotModal } from './components/AddSpotModal';

@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { PlannerCriteria, Coordinates } from '../types';
 import PlannerStep1Concept from './PlannerStep1Concept';
@@ -112,4 +113,4 @@ const PlannerWizard: React.FC<PlannerWizardProps> = ({
   );
 };
 
-export { PlannerWizard };
+export default PlannerWizard;
