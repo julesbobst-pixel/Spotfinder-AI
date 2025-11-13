@@ -1,4 +1,3 @@
-
 import React, { useEffect } from 'react';
 import { SearchCriteria } from '../types';
 
@@ -52,14 +51,14 @@ const Step3Style: React.FC<Step3StyleProps> = ({ criteria, setCriteria, styles }
           <label
             key={style}
             className={`flex items-center p-3 rounded-lg cursor-pointer transition-all border-2
-              ${criteria.styles.includes(style) ? 'bg-red-500/20 border-red-500' : 'bg-gray-800/50 border-gray-600 hover:border-red-500'}
+              ${criteria.styles.includes(style) ? 'bg-primary-500/20 border-primary-500' : 'bg-gray-800/50 border-gray-600 hover:border-primary-500'}
             `}
           >
             <input
               type="checkbox"
               checked={criteria.styles.includes(style)}
               onChange={() => toggleStyle(style)}
-              className="w-5 h-5 rounded accent-red-500 bg-gray-700 border-gray-600 focus:ring-red-500"
+              className="w-5 h-5 rounded accent-primary-500 bg-gray-700 border-gray-600 focus:ring-primary-500"
             />
             <span className="ml-3 text-sm font-medium text-gray-200">{style}</span>
           </label>

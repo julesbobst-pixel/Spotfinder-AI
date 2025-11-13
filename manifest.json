@@ -1,0 +1,23 @@
+{
+  "short_name": "PhotoSpot",
+  "name": "PhotoSpot Finder",
+  "description": "An app to help photographers find new, high-quality photo spots in their immediate vicinity based on their specific preferences for subject, style, and time of day, including a precise weather forecast.",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#262626",
+  "background_color": "#171717"
+}

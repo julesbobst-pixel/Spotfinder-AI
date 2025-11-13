@@ -1,9 +1,7 @@
-
-
-import React, { useState, useEffect } from 'react';
-import { SearchCriteria, Coordinates, PhotoSpot, User, UserData, PhotoshootPlan, PlannerCriteria, TimeSlotSuggestion } from './types';
-import { findPhotoSpots, generatePhotoshootPlan, getTimeSlotSuggestions, initializeGenAI } from './services/geminiService';
-import { MOTIVS, DYNAMIC_STYLES, TIMES_OF_DAY, MAX_RADIUS, QUICK_SEARCH_LOADING_MESSAGES, PLANNER_LOADING_MESSAGES, PLANNER_SUGGESTION_LOADING_MESSAGES } from './constants';
+import React, { useState, useEffect, useCallback } from 'react';
+import { SearchCriteria, Coordinates, PhotoSpot, User, UserData, PhotoshootPlan, PlannerCriteria, ImageState } from './types';
+import { findPhotoSpots, generatePhotoshootPlan, geocodeLocation, generateSpotImage } from './services/geminiService';
+import { MOTIVS, DYNAMIC_STYLES, TIMES_OF_DAY, MAX_RADIUS, QUICK_SEARCH_LOADING_MESSAGES, PLANNER_LOADING_MESSAGES } from './constants';
 
 import StepIndicator from './components/StepIndicator';
 import Step1Motiv from './components/Step1Motiv';
@@ -12,16 +10,41 @@ import Step3Style from './components/Step3Style';
 import Step4Time from './components/Step4Time';
 import LoadingSpinner from './components/LoadingSpinner';
 import Results from './components/Results';
-import AuthModal from './components/AuthModal';
 import Profile from './components/Profile';
-import PlannerWizard from './components/PlannerWizard';
+// FIX: Changed to a named import as PlannerWizard does not have a default export.
+import { PlannerWizard } from './components/PlannerWizard';
 import PlanningResult from './components/PlanningResult';
-import SpotDetail from './components/SpotDetail';
-import ApiKeyModal from './components/ApiKeyModal';
+// Fix: Changed import to a named import as the error indicates no default export was found.
+import { AddSpotModal } from './components/AddSpotModal';
 import { UserIcon } from './components/icons/CardIcons';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const DEFAULT_USER: User = { id: 'default', username: 'Mein Profil' };
+const USER_DATA_KEY = `spotfinder_userdata_${DEFAULT_USER.id}`;
+
+/**
+ * Calculates the distance between two coordinates in kilometers using the Haversine formula.
+ */
+const getDistance = (coords1: Coordinates, coords2: Coordinates): number => {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+
+  const R = 6371; // Radius of the Earth in km
+  const dLat = toRad(coords2.lat - coords1.lat);
+  const dLon = toRad(coords2.lon - coords1.lon);
+  const lat1 = toRad(coords1.lat);
+  const lat2 = toRad(coords1.lat);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+
+  return distance;
+};
+
 
 const App: React.FC = () => {
-  const [apiKey, setApiKey] = useState<string | null>(null);
   const [mode, setMode] = useState<'quick' | 'planner'>('quick');
   
   // Quick Search State
@@ -34,21 +57,20 @@ const App: React.FC = () => {
     timeOfDay: 'Nachmittag',
   });
   const [spots, setSpots] = useState<PhotoSpot[]>([]);
-  const [selectedSpot, setSelectedSpot] = useState<PhotoSpot | null>(null);
+  const [imageStates, setImageStates] = useState<{ [spotId: string]: ImageState }>({});
   
   // Planner State
   const [plan, setPlan] = useState<PhotoshootPlan | null>(null);
-  const [plannerPhase, setPlannerPhase] = useState<'input' | 'suggestions' | 'plan'>('input');
   const [plannerStep, setPlannerStep] = useState(1);
   const [plannerCriteria, setPlannerCriteria] = useState<Partial<PlannerCriteria>>({
-      subject: '',
+      motivs: [],
       styles: [],
       keyElements: '',
+      dateRange: { start: '', end: '' },
       desiredWeather: [],
       desiredLight: [],
       radius: 25,
   });
-  const [plannerSuggestions, setPlannerSuggestions] = useState<TimeSlotSuggestion[]>([]);
 
 
   // Shared State
@@ -56,101 +78,102 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [error, setError] = useState<string>('');
-  const [view, setView] = useState<'search' | 'results' | 'profile' | 'detail'>('search');
-
-  // Auth state
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [view, setView] = useState<'search' | 'results' | 'profile'>('search');
   const [userData, setUserData] = useState<UserData>({ favorites: [], visited: [], savedPlans: [] });
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const [isAddSpotModalOpen, setIsAddSpotModalOpen] = useState(false);
+  const [toast, setToast] = useState<{ message: string; id: number } | null>(null);
 
-
-  // Check for API key on mount
-  useEffect(() => {
-    const savedApiKey = localStorage.getItem('gemini_api_key');
-    if (savedApiKey) {
-        setApiKey(savedApiKey);
-        initializeGenAI(savedApiKey);
-    }
-  }, []);
 
   // Load user data from localStorage on mount
   useEffect(() => {
-    const savedUser = localStorage.getItem('spotfinder_user');
-    if (savedUser) {
-      const user = JSON.parse(savedUser) as User;
-      setCurrentUser(user);
-      loadUserData(user.id);
+    const savedData = localStorage.getItem(USER_DATA_KEY);
+    if (savedData) {
+      try {
+        const data = JSON.parse(savedData);
+        // Simple migration: if visited is an array of strings (old format), clear it.
+        if (data.visited && data.visited.length > 0 && typeof data.visited[0] === 'string') {
+            data.visited = [];
+        }
+        setUserData({ favorites: [], visited: [], savedPlans: [], ...data });
+      } catch (e) {
+        console.error("Failed to parse user data from localStorage", e);
+        localStorage.removeItem(USER_DATA_KEY);
+      }
     }
   }, []);
 
   // Loading message effect
   useEffect(() => {
-    // Fix: Replaced NodeJS.Timeout with number for browser compatibility.
     let interval: number;
     if (isLoading) {
-      let messages: string[];
-      if (mode === 'quick') {
-        messages = QUICK_SEARCH_LOADING_MESSAGES;
-      } else {
-        messages = plannerPhase === 'suggestions' ? PLANNER_SUGGESTION_LOADING_MESSAGES : PLANNER_LOADING_MESSAGES;
-      }
-
+      const messages = mode === 'quick' ? QUICK_SEARCH_LOADING_MESSAGES : PLANNER_LOADING_MESSAGES;
       setLoadingMessage(messages[0]);
       let i = 1;
-      interval = setInterval(() => {
+      interval = window.setInterval(() => {
         setLoadingMessage(messages[i % messages.length]);
         i++;
       }, 2500);
     }
-    return () => clearInterval(interval);
-  }, [isLoading, mode, plannerPhase]);
+    return () => window.clearInterval(interval);
+  }, [isLoading, mode]);
 
-
-  const loadUserData = (userId: string) => {
-    const savedData = localStorage.getItem(`spotfinder_userdata_${userId}`);
-    if (savedData) {
-      const data = JSON.parse(savedData);
-      setUserData({ favorites: [], visited: [], savedPlans: [], ...data });
-    }
+  const showToast = (message: string) => {
+    setToast({ message, id: Date.now() });
+    setTimeout(() => setToast(null), 3000);
   };
 
-  const saveUserData = (userId: string, data: UserData) => {
-    localStorage.setItem(`spotfinder_userdata_${userId}`, JSON.stringify(data));
-  };
-  
-  const handleApiKeySave = (key: string) => {
-    localStorage.setItem('gemini_api_key', key);
-    setApiKey(key);
-    initializeGenAI(key);
-  };
-
-  const handleLogin = (username: string) => {
-    const user = { id: username.toLowerCase(), username };
-    setCurrentUser(user);
-    localStorage.setItem('spotfinder_user', JSON.stringify(user));
-    loadUserData(user.id);
-    setIsAuthModalOpen(false);
-    
-    if (pendingAction) {
-        pendingAction();
-        setPendingAction(null);
-    }
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setUserData({ favorites: [], visited: [], savedPlans: [] });
-    localStorage.removeItem('spotfinder_user');
+    const resetQuickSearch = useCallback(() => {
+    setCurrentStep(1);
+    setCriteria({
+        mediaType: 'photo',
+        motivs: [],
+        radius: 20,
+        styles: [],
+        timeOfDay: 'Nachmittag',
+    });
+    setSpots([]);
+    setImageStates({});
+    setError('');
     setView('search');
+  }, []);
+
+  const resetPlannerState = useCallback(() => {
+    setPlan(null);
+    setPlannerStep(1);
+    setPlannerCriteria({
+        motivs: [],
+        styles: [],
+        keyElements: '',
+        dateRange: { start: '', end: '' },
+        desiredWeather: [],
+        desiredLight: [],
+        radius: 25,
+    });
+  }, []);
+
+  const handleModeChange = (newMode: 'quick' | 'planner') => {
+    if (mode === newMode) return;
+    navigator.vibrate?.(50);
+    hardReset();
+    setMode(newMode);
+  }
+
+  const hardReset = useCallback(() => {
+    resetQuickSearch();
+    resetPlannerState();
+    setMode('quick');
+  }, [resetQuickSearch, resetPlannerState]);
+
+  // This effect ensures the app starts fresh on every "open" (component mount).
+  useEffect(() => {
+    hardReset();
+  }, [hardReset]);
+
+  const saveUserData = (data: UserData) => {
+    localStorage.setItem(USER_DATA_KEY, JSON.stringify(data));
   };
 
   const handleToggleFavorite = (spot: PhotoSpot) => {
-    if (!currentUser) {
-      setPendingAction(() => () => handleToggleFavorite(spot));
-      setIsAuthModalOpen(true);
-      return;
-    }
     const isFavorite = userData.favorites.some(fav => fav.id === spot.id);
     const newFavorites = isFavorite
       ? userData.favorites.filter(fav => fav.id !== spot.id)
@@ -158,26 +181,41 @@ const App: React.FC = () => {
     
     const newUserData = { ...userData, favorites: newFavorites };
     setUserData(newUserData);
-    saveUserData(currentUser.id, newUserData);
+    saveUserData(newUserData);
   };
 
-  const handleToggleVisited = (spotId: string) => {
-    if (!currentUser) {
-      setPendingAction(() => () => handleToggleVisited(spotId));
-      setIsAuthModalOpen(true);
-      return;
-    }
-    const isVisited = userData.visited.includes(spotId);
+  const handleToggleVisited = (spot: PhotoSpot) => {
+    const isVisited = userData.visited.some(s => s.id === spot.id);
     const newVisited = isVisited
-      ? userData.visited.filter(id => id !== spotId)
-      : [...userData.visited, spotId];
+      ? userData.visited.filter(s => s.id !== spot.id)
+      : [...userData.visited, spot];
 
     const newUserData = { ...userData, visited: newVisited };
     setUserData(newUserData);
-    saveUserData(currentUser.id, newUserData);
+    saveUserData(newUserData);
+  };
+  
+  const handleSaveNewSpot = async (spotData: { name: string; address: string; description: string }) => {
+    const { name, address, description } = spotData;
+    const geocoded = await geocodeLocation(address);
+    
+    const newSpot: PhotoSpot = {
+        id: name.toLowerCase().replace(/\s/g, '-') + '-' + Date.now(),
+        name,
+        address: geocoded.name, // Use the verified name from geocoding
+        description,
+        coordinates: { lat: geocoded.lat, lon: geocoded.lon },
+        matchingCriteria: ['Manuell hinzugefügt'],
+    };
+
+    const newUserData = { ...userData, visited: [...userData.visited, newSpot] };
+    setUserData(newUserData);
+    saveUserData(newUserData);
+    setIsAddSpotModalOpen(false);
   };
 
   const handleNextStep = () => {
+    navigator.vibrate?.(50);
     if (currentStep < 4) {
       setCurrentStep(currentStep + 1);
     } else {
@@ -186,6 +224,7 @@ const App: React.FC = () => {
   };
 
   const handlePrevStep = () => {
+    navigator.vibrate?.(50);
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
     }
@@ -218,7 +257,11 @@ const App: React.FC = () => {
 
     try {
       const results = await findPhotoSpots(criteria, userLocation);
-      setSpots(results);
+      const spotsWithDistance = results.map(spot => ({
+        ...spot,
+        distance: userLocation ? parseFloat(getDistance(userLocation, spot.coordinates).toFixed(1)) : undefined
+      }));
+      setSpots(spotsWithDistance);
       setView('results');
     } catch (e: any) {
       setError(e.message || 'Ein unerwarteter Fehler ist aufgetreten.');
@@ -227,41 +270,47 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSelectSpot = (spot: PhotoSpot) => {
-    setSelectedSpot(spot);
-    setView('detail');
-  };
+  const handleLoadImage = useCallback(async (spotId: string, spotName: string, description: string) => {
+    let progressInterval: number;
+    
+    // Start "fake" progress
+    setImageStates(prev => ({ ...prev, [spotId]: { isLoading: true, image: null, error: null, progress: 0 } }));
+    
+    let progress = 0;
+    progressInterval = window.setInterval(() => {
+        progress += 5;
+        if (progress >= 95) {
+            window.clearInterval(progressInterval);
+        }
+        setImageStates(prev => {
+            if (prev[spotId] && !prev[spotId].isLoading) {
+                window.clearInterval(progressInterval);
+                return prev;
+            }
+            return { ...prev, [spotId]: { ...prev[spotId], isLoading: true, image: null, error: null, progress } };
+        });
+    }, 200);
+
+    try {
+      const image = await generateSpotImage(spotName, description);
+      window.clearInterval(progressInterval);
+      setImageStates(prev => ({ ...prev, [spotId]: { isLoading: false, image, error: null, progress: 100 } }));
+    } catch (e: any) {
+      window.clearInterval(progressInterval);
+      setImageStates(prev => ({ ...prev, [spotId]: { isLoading: false, image: null, error: e.message || 'Bild konnte nicht geladen werden.', progress: 0 } }));
+    }
+  }, []);
   
   // --- PLANNER HANDLERS ---
-  const handleGetSuggestions = async () => {
+  const handleGeneratePlan = async () => {
     if (!plannerCriteria.userLocation) {
         setError("Bitte gib zuerst deinen Standort an.");
         return;
     }
     setError('');
     setIsLoading(true);
-    setPlannerPhase('suggestions');
     try {
-        const result = await getTimeSlotSuggestions(plannerCriteria as PlannerCriteria);
-        setPlannerSuggestions(result);
-        if (result.length === 0) {
-            setError("Leider konnten keine passenden Zeitfenster gefunden werden. Versuche, die Kriterien anzupassen (z.B. anderes Wetter oder Licht).");
-        } else {
-             setPlannerStep(4);
-        }
-    } catch(e: any) {
-        setError(e.message || "Fehler bei der Suche nach Terminvorschlägen.");
-    } finally {
-        setIsLoading(false);
-    }
-  };
-
-  const handleGeneratePlan = async (dateTime: string) => {
-    setError('');
-    setIsLoading(true);
-    setPlannerPhase('plan');
-    try {
-        const planResult = await generatePhotoshootPlan(plannerCriteria as PlannerCriteria, dateTime);
+        const planResult = await generatePhotoshootPlan(plannerCriteria as PlannerCriteria);
         const planWithId = {
             ...planResult,
             id: planResult.title.toLowerCase().replace(/\s/g, '-') + '-' + Date.now()
@@ -276,67 +325,26 @@ const App: React.FC = () => {
   };
   
   const handleSavePlan = (planToSave: PhotoshootPlan) => {
-    if (!currentUser) {
-        setPendingAction(() => () => handleSavePlan(planToSave));
-        setIsAuthModalOpen(true);
-        return;
-    }
     if (userData.savedPlans.some(p => p.id === planToSave.id)) return; // Already saved
 
     const newPlans = [...userData.savedPlans, planToSave];
     const newUserData = { ...userData, savedPlans: newPlans };
     setUserData(newUserData);
-    saveUserData(currentUser.id, newUserData);
-    alert('Plan erfolgreich in deinem Profil gespeichert!');
+    saveUserData(newUserData);
+    showToast('Plan erfolgreich in deinem Profil gespeichert!');
   };
   
   const handleDeletePlan = (planId: string) => {
-    if (!currentUser) return;
     const newPlans = userData.savedPlans.filter(p => p.id !== planId);
     const newUserData = { ...userData, savedPlans: newPlans };
     setUserData(newUserData);
-    saveUserData(currentUser.id, newUserData);
+    saveUserData(newUserData);
   }
   
   const goToProfile = () => {
+      navigator.vibrate?.(50);
       setView('profile');
       setMode('quick'); // Switch mode to avoid showing planner UI behind profile
-  }
-
-  const resetQuickSearch = () => {
-    setCurrentStep(1);
-    setCriteria({
-        mediaType: 'photo',
-        motivs: [],
-        radius: 20,
-        styles: [],
-        timeOfDay: 'Nachmittag',
-    });
-    setSpots([]);
-    setError('');
-    setView('search');
-    setSelectedSpot(null);
-  };
-
-  const resetPlannerState = () => {
-    setPlan(null);
-    setPlannerPhase('input');
-    setPlannerStep(1);
-    setPlannerCriteria({
-        subject: '',
-        styles: [],
-        keyElements: '',
-        desiredWeather: [],
-        desiredLight: [],
-        radius: 25,
-    });
-    setPlannerSuggestions([]);
-  };
-
-  const hardReset = () => {
-    resetQuickSearch();
-    resetPlannerState();
-    setMode('quick');
   }
 
   const renderQuickSearch = () => {
@@ -345,28 +353,28 @@ const App: React.FC = () => {
         spots={spots} 
         userLocation={userLocation!}
         resetSearch={resetQuickSearch}
-        currentUser={currentUser}
+        onRemix={handleSearch}
+        currentUser={DEFAULT_USER}
         userData={userData}
         onToggleFavorite={handleToggleFavorite}
         onToggleVisited={handleToggleVisited}
-        onSpotSelect={handleSelectSpot}
+        imageStates={imageStates}
+        onLoadImage={handleLoadImage}
       />;
     }
-
-    if (view === 'detail' && selectedSpot) {
-      return <SpotDetail spot={selectedSpot} onBack={() => setView('results')} />
-    }
     
-    if (view === 'profile' && currentUser) {
+    if (view === 'profile') {
         return <Profile
-            currentUser={currentUser}
+            currentUser={DEFAULT_USER}
             userData={userData}
             userLocation={userLocation}
             onToggleFavorite={handleToggleFavorite}
             onToggleVisited={handleToggleVisited}
             onDeletePlan={handleDeletePlan}
             setView={setView}
-            onSpotSelect={handleSelectSpot}
+            onAddNewSpot={() => setIsAddSpotModalOpen(true)}
+            imageStates={imageStates}
+            onLoadImage={handleLoadImage}
         />
     }
 
@@ -375,7 +383,12 @@ const App: React.FC = () => {
           case 1:
             return <Step1Motiv criteria={criteria} setCriteria={setCriteria} motivs={MOTIVS} />;
           case 2:
-            return <Step2Location criteria={criteria} setCriteria={setCriteria} setUserLocation={setUserLocation} maxRadius={MAX_RADIUS} />;
+            return <Step2Location 
+                     radius={criteria.radius}
+                     onRadiusChange={(r) => setCriteria(prev => ({ ...prev, radius: r }))}
+                     setUserLocation={setUserLocation} 
+                     maxRadius={MAX_RADIUS} 
+                   />;
           case 3:
             return <Step3Style criteria={criteria} setCriteria={setCriteria} styles={DYNAMIC_STYLES} />;
           case 4:
@@ -387,32 +400,38 @@ const App: React.FC = () => {
     
     const totalSteps = 4;
     return (
-      <div className="futuristic-bg p-8 rounded-2xl futuristic-border w-full max-w-3xl mx-auto shadow-2xl">
+      <motion.div
+        key="quick-search-wizard"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -20 }}
+        transition={{ duration: 0.3 }}
+        className="futuristic-bg p-8 rounded-2xl futuristic-border w-full max-w-3xl mx-auto shadow-2xl"
+      >
         <div className="mb-8">
             <StepIndicator currentStep={currentStep} totalSteps={totalSteps} />
         </div>
         {error && <p className="text-red-400 text-center mb-4">{error}</p>}
         {renderCurrentStep()}
         <div className="flex justify-between mt-10">
-          <button onClick={handlePrevStep} disabled={currentStep === 1} className="px-8 py-3 bg-gray-600/50 border border-gray-500 text-white rounded-lg hover:bg-gray-500/50 transition-all disabled:opacity-50">Zurück</button>
-          <button onClick={handleNextStep} disabled={isNextDisabled()} className="px-8 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all disabled:bg-gray-500/80 disabled:cursor-not-allowed disabled:shadow-none btn-primary-glow">
+          <button onClick={handlePrevStep} disabled={currentStep === 1} className="px-8 py-3 bg-gray-700 border border-gray-600 text-white rounded-lg hover:bg-gray-600 transition-all disabled:opacity-50">Zurück</button>
+          <button onClick={handleNextStep} disabled={isNextDisabled()} className="px-8 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-all disabled:bg-gray-700/80 disabled:cursor-not-allowed disabled:shadow-none btn-primary-glow">
             {currentStep === totalSteps ? 'Spots finden' : 'Weiter'}
           </button>
         </div>
-      </div>
+      </motion.div>
     );
   };
 
   const renderPlanner = () => {
     if (plan) {
-        const isPlanSaved = currentUser ? userData.savedPlans.some(p => p.id === plan.id) : false;
+        const isPlanSaved = userData.savedPlans.some(p => p.id === plan.id);
         return <PlanningResult 
             plan={plan} 
             onReset={resetPlannerState}
             onSavePlan={handleSavePlan}
             onGoToProfile={goToProfile}
             isSaved={isPlanSaved}
-            isLoggedIn={!!currentUser}
         />;
     }
     return <PlannerWizard 
@@ -420,8 +439,6 @@ const App: React.FC = () => {
         setStep={setPlannerStep}
         criteria={plannerCriteria}
         setCriteria={setPlannerCriteria}
-        suggestions={plannerSuggestions}
-        onGetSuggestions={handleGetSuggestions}
         onGeneratePlan={handleGeneratePlan}
     />;
   }
@@ -436,58 +453,56 @@ const App: React.FC = () => {
         </div>
       );
     }
-    if (error && !plan && view !== 'results' && mode === 'quick' && view !== 'detail') {
-        return <p className="text-red-400 text-center mb-4">{error}</p>
-    }
 
     return mode === 'quick' ? renderQuickSearch() : renderPlanner();
   };
   
-  if (!apiKey) {
-    return <ApiKeyModal onSave={handleApiKeySave} />;
-  }
-  
   return (
-    <div className="min-h-screen text-white font-sans flex flex-col items-center p-4 sm:p-8 relative">
+    <div className="min-h-screen text-white font-sans flex flex-col items-center relative safe-area-padding">
+       <AnimatePresence>
+            {toast && (
+                <motion.div
+                    key={toast.id}
+                    initial={{ opacity: 0, y: -50 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -50 }}
+                    className="fixed top-8 right-5 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50"
+                >
+                    {toast.message}
+                </motion.div>
+            )}
+        </AnimatePresence>
         <header className="w-full max-w-6xl mx-auto flex justify-between items-center mb-4">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-red-500 to-red-400 text-transparent bg-clip-text tracking-tight cursor-pointer" onClick={hardReset}>SpotFinder KI</h1>
-            <div>
-                {currentUser ? (
-                    <div className="flex items-center gap-4">
-                        <button onClick={goToProfile} className="flex items-center gap-2 font-semibold hover:text-red-400 transition-colors">
-                            <UserIcon className="w-6 h-6"/>
-                            {currentUser.username}
-                        </button>
-                        <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white">Logout</button>
-                    </div>
-                ) : (
-                    <button onClick={() => setIsAuthModalOpen(true)} className="px-5 py-2.5 bg-gray-700/50 border border-gray-600 text-white font-semibold rounded-lg hover:bg-gray-600/50 transition-all">
-                        Login
-                    </button>
-                )}
+            <h1 className="text-4xl font-extrabold gradient-text-primary tracking-tight cursor-pointer" onClick={hardReset}>SpotFinder AI</h1>
+            <div className="flex items-center gap-4">
+                <button onClick={goToProfile} className="flex items-center gap-2 font-semibold hover:text-primary-400 transition-colors">
+                    <UserIcon className="w-6 h-6"/>
+                    {DEFAULT_USER.username}
+                </button>
             </div>
         </header>
 
-        <div className="w-full max-w-6xl mx-auto flex justify-center items-center mb-8 futuristic-bg p-2 rounded-xl futuristic-border">
-            <button onClick={() => setMode('quick')} className={`w-1/2 text-center py-2.5 rounded-lg font-semibold transition-all ${mode === 'quick' ? 'bg-red-600 text-white btn-primary-glow' : 'hover:bg-white/5'}`}>
+        <div className="w-full max-w-2xl mx-auto flex justify-center items-center mb-8 futuristic-bg p-1.5 rounded-xl futuristic-border">
+            <button onClick={() => handleModeChange('quick')} className={`w-1/2 text-center py-2.5 rounded-lg font-semibold transition-all ${mode === 'quick' ? 'bg-primary-600 text-white shadow-lg' : 'hover:bg-white/5'}`}>
                 Schnellsuche
             </button>
-            <button onClick={() => setMode('planner')} className={`w-1/2 text-center py-2.5 rounded-lg font-semibold transition-all ${mode === 'planner' ? 'bg-red-600 text-white btn-primary-glow' : 'hover:bg-white/5'}`}>
-                Shooting-Planer
+            <button onClick={() => handleModeChange('planner')} className={`w-1/2 text-center py-2.5 rounded-lg font-semibold transition-all ${mode === 'planner' ? 'bg-primary-600 text-white shadow-lg' : 'hover:bg-white/5'}`}>
+                Creative Studio
             </button>
         </div>
         
         <main className="w-full max-w-6xl mx-auto flex-grow flex items-center justify-center">
-            {renderContent()}
+            <AnimatePresence mode="wait">
+                {renderContent()}
+            </AnimatePresence>
         </main>
 
-        {isAuthModalOpen && <AuthModal 
-            onLogin={handleLogin} 
-            onClose={() => {
-                setIsAuthModalOpen(false);
-                setPendingAction(null);
-            }} 
-        />}
+        {isAddSpotModalOpen && (
+            <AddSpotModal
+                onClose={() => setIsAddSpotModalOpen(false)}
+                onSave={handleSaveNewSpot}
+            />
+        )}
     </div>
   );
 };

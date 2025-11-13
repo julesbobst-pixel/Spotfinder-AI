@@ -31,8 +31,8 @@ const WeatherDisplay: React.FC<WeatherDisplayProps> = ({ weather, isLoading }) =
   }
 
   return (
-    <div className="bg-gray-700/50 p-3 rounded-lg flex items-center gap-3 border border-gray-600/50">
-      <div className="flex-shrink-0 text-red-400">
+    <div className="bg-gray-700/50 p-3 rounded-lg flex items-start gap-3 border border-gray-600/50">
+      <div className="flex-shrink-0 text-primary-400 pt-1">
         <WeatherIcon condition={weather.condition} className="w-10 h-10" />
       </div>
       <div>
@@ -42,6 +42,7 @@ const WeatherDisplay: React.FC<WeatherDisplayProps> = ({ weather, isLoading }) =
             {WEATHER_DETAILS_CONFIG.precipitationChance && <span>N: {weather.precipitationChance}%</span>}
             {WEATHER_DETAILS_CONFIG.windSpeed && <span className="ml-2">W: {weather.windSpeed} km/h</span>}
         </div>
+        {weather.notes && <p className="text-xs text-accent italic mt-2 max-w-xs">{weather.notes}</p>}
       </div>
     </div>
   );
