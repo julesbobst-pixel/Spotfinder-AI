@@ -1,6 +1,5 @@
 import React from 'react';
 
-// Fix: Removed self-import of types from this file which caused declaration conflicts.
 export interface Coordinates {
   lat: number;
   lon: number;
@@ -20,25 +19,17 @@ export interface SearchCriteria {
 
 export interface PhotoSpot {
   id: string;
-  name: string;
+  name:string;
   address: string;
   description: string;
   coordinates: Coordinates;
   distance?: number; // in km, calculated client-side
   matchingCriteria: string[];
   weather?: WeatherData;
-}
-
-export interface DetailedSpotInfo {
-    address: string;
-    summary: string;
-    keyAspects: string[];
-    travelInfo: {
-        parking: string;
-        publicTransport: string;
-    };
-    bestTimeToVisit: string;
-    imagePrompt: string;
+  keyAspects?: string[];
+  bestTimeToVisit?: string;
+  photoTips?: string[];
+  proTip?: string;
 }
 
 export interface WeatherData {
@@ -57,17 +48,21 @@ export interface User {
 
 export interface UserData {
     favorites: PhotoSpot[];
-    visited: string[]; // array of spot IDs
+    visited: PhotoSpot[]; // array of spot objects
     savedPlans: PhotoshootPlan[];
 }
 
 // For NEW Planner Mode
 export interface PlannerCriteria {
     // Step 1
-    subject: string;
+    motivs: string[];
     styles: string[];
     keyElements: string; // Optional short text for specifics
     // Step 2
+    dateRange: {
+        start: string; // YYYY-MM-DD
+        end: string;   // YYYY-MM-DD
+    }
     desiredWeather: string[];
     desiredLight: string[];
     // Step 3
@@ -75,14 +70,10 @@ export interface PlannerCriteria {
     radius: number;
 }
 
-export interface TimeSlotSuggestion {
-    dateTime: string; // ISO format string
-    reason: string;
-}
-
 export interface PhotoshootPlan {
     id: string;
     title: string;
+    dateTime: string; // The chosen optimal date time by the AI
     spot: {
         name: string;
         description: string;
@@ -105,19 +96,16 @@ export interface PhotoshootPlan {
     moodImagePrompts: string[];
 }
 
-export interface IdeaStarter {
-    id: string;
+export interface GeneratedIdea {
     title: string;
     description: string;
-    icon: React.FC<{ className?: string }>;
-    prefill: {
-        subject: string;
-        styles: string[];
-        keyElements: string;
-    }
+    styles: string[];
+    keyElements: string;
 }
 
-export interface ImageAnalysis {
-  photographicElements: string[];
-  colorPalette: string[]; // hex codes
-}
+export type ImageState = {
+    isLoading: boolean;
+    image: string | null;
+    error: string | null;
+    progress?: number;
+};

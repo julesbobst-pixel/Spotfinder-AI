@@ -1,10 +1,10 @@
 
 import React from 'react';
-import { PlannerCriteria, Coordinates, TimeSlotSuggestion } from '../types';
-import PlannerStep1Idea from './PlannerStep1Idea';
-import PlannerStep2Conditions from './PlannerStep2Conditions';
+import { PlannerCriteria, Coordinates } from '../types';
+import PlannerStep1Concept from './PlannerStep1Concept';
+import PlannerStep2DateTime from './PlannerStep2DateTime';
 import Step2Location from './Step2Location';
-import PlannerStep4Suggestions from './PlannerStep4Suggestions';
+import { motion, AnimatePresence } from 'framer-motion';
 
 import { MAX_RADIUS } from '../constants';
 
@@ -13,21 +13,27 @@ interface PlannerWizardProps {
   setStep: (step: number) => void;
   criteria: Partial<PlannerCriteria>;
   setCriteria: React.Dispatch<React.SetStateAction<Partial<PlannerCriteria>>>;
-  suggestions: TimeSlotSuggestion[];
-  onGetSuggestions: () => void;
-  onGeneratePlan: (dateTime: string) => void;
+  onGeneratePlan: () => void;
+  isOffline: boolean;
 }
 
 const PlannerWizard: React.FC<PlannerWizardProps> = ({ 
-    step, setStep, criteria, setCriteria, suggestions, onGetSuggestions, onGeneratePlan 
+    step, setStep, criteria, setCriteria, onGeneratePlan, isOffline
 }) => {
-  const handleNext = () => setStep(step + 1);
-  const handleBack = () => setStep(step - 1);
+  const handleNext = () => {
+    navigator.vibrate?.(50);
+    setStep(step + 1);
+  };
+  const handleBack = () => {
+    navigator.vibrate?.(50);
+    setStep(step - 1);
+  };
 
   const isNextDisabled = () => {
+    if (isOffline) return true;
     switch(step) {
-        case 1: return !criteria.subject || criteria.styles!.length === 0;
-        case 2: return criteria.desiredWeather!.length === 0 || criteria.desiredLight!.length === 0;
+        case 1: return !criteria.motivs || criteria.motivs.length === 0;
+        case 2: return !criteria.dateRange?.start || !criteria.dateRange?.end;
         case 3: return !criteria.userLocation;
         default: return true;
     }
@@ -36,65 +42,74 @@ const PlannerWizard: React.FC<PlannerWizardProps> = ({
   const renderStep = () => {
     switch (step) {
       case 1:
-        return <PlannerStep1Idea criteria={criteria} setCriteria={setCriteria} />;
+        return <PlannerStep1Concept criteria={criteria} setCriteria={setCriteria} isOffline={isOffline} />;
       case 2:
-        return <PlannerStep2Conditions criteria={criteria} setCriteria={setCriteria} />;
+        return <PlannerStep2DateTime criteria={criteria} setCriteria={setCriteria} />;
       case 3:
         return <Step2Location 
-                    criteria={{ radius: criteria.radius!, ...criteria } as any} 
-                    setCriteria={(update: React.SetStateAction<any>) => {
-                        if (typeof update === 'function') {
-                            setCriteria(prev => ({...prev, radius: update(prev).radius }));
-                        }
-                    }} 
-                    setUserLocation={(loc: Coordinates | null) => setCriteria(prev => ({...prev, userLocation: loc!}))} 
-                    maxRadius={MAX_RADIUS} 
+                    radius={criteria.radius || 25}
+                    onRadiusChange={(r) => setCriteria(prev => ({...prev, radius: r}))} 
+                    setUserLocation={(loc: Coordinates | null) => setCriteria(prev => ({...prev, userLocation: loc || undefined}))} 
+                    maxRadius={MAX_RADIUS}
+                    isOffline={isOffline}
                 />;
-      case 4:
-          return <PlannerStep4Suggestions suggestions={suggestions} onSelect={onGeneratePlan} onBack={handleBack} />
       default:
         return null;
     }
   };
 
   const StepIndicatorBar = ({ current, total }: { current: number, total: number }) => {
-    const steps = ["Idee", "Bedingungen", "Standort", "Terminwahl"];
+    const steps = ["Konzept", "Bedingungen", "Standort"];
     return (
         <div className="flex justify-center items-center mb-8">
             {steps.map((label, index) => (
-                <React.Fragment key={index}>
+                <React.Fragment key={label}>
                     <div className="flex flex-col items-center">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${current >= index + 1 ? 'bg-red-500 border-red-500' : 'bg-gray-700/50 border-gray-600'}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${current > index + 1 ? 'bg-green-500' : current === index + 1 ? 'bg-primary-500' : 'bg-gray-600'}`}>
                             {current > index + 1 ? '✓' : index + 1}
                         </div>
                         <p className={`mt-2 text-xs font-semibold ${current >= index + 1 ? 'text-white' : 'text-gray-400'}`}>{label}</p>
                     </div>
-                    {index < total - 1 && <div className={`flex-auto h-0.5 transition-all mx-2 sm:mx-4 ${current > index + 1 ? 'bg-red-500' : 'bg-gray-600'}`}></div>}
+                    {index < steps.length - 1 && <div className={`flex-1 h-1 mx-4 transition-all ${current > index + 1 ? 'bg-green-500' : 'bg-gray-700'}`}></div>}
                 </React.Fragment>
             ))}
         </div>
-    )
-  }
+    );
+  };
 
-  return (
-    <div className="futuristic-bg p-6 sm:p-8 rounded-2xl futuristic-border w-full max-w-3xl mx-auto shadow-2xl">
-      <StepIndicatorBar current={step} total={4} />
-      <div className="min-h-[300px] flex items-center justify-center">
-        {renderStep()}
-      </div>
-      
-      {step < 4 && (
+ return (
+    <motion.div
+      key="planner-wizard"
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.4, ease: "easeInOut" }}
+      className="futuristic-bg p-8 rounded-2xl futuristic-border w-full max-w-3xl mx-auto shadow-2xl"
+    >
+        <StepIndicatorBar current={step} total={3} />
+        <AnimatePresence mode="wait">
+            <motion.div
+              key={step}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+            >
+              {renderStep()}
+            </motion.div>
+        </AnimatePresence>
         <div className="flex justify-between mt-10">
-            <button onClick={handleBack} disabled={step === 1} className="px-8 py-3 bg-gray-600/50 border border-gray-500 text-white rounded-lg hover:bg-gray-500/50 transition-all disabled:opacity-50">Zurück</button>
-            {step < 3 ? (
-            <button onClick={handleNext} disabled={isNextDisabled()} className="px-8 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all disabled:bg-gray-500/80 disabled:cursor-not-allowed disabled:shadow-none btn-primary-glow">Weiter</button>
-            ) : (
-            <button onClick={onGetSuggestions} disabled={isNextDisabled()} className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all disabled:bg-gray-500/80 disabled:cursor-not-allowed">Termine finden</button>
-            )}
+            <button onClick={handleBack} disabled={step === 1} className="px-8 py-3 bg-gray-700 border border-gray-600 text-white rounded-lg hover:bg-gray-600 transition-all disabled:opacity-50">Zurück</button>
+            <button
+                onClick={step === 3 ? () => { navigator.vibrate?.(80); onGeneratePlan(); } : handleNext}
+                disabled={isNextDisabled()}
+                className="px-8 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-all disabled:bg-gray-700/80 disabled:cursor-not-allowed disabled:shadow-none btn-primary-glow"
+            >
+                {step === 3 ? 'Plan generieren' : 'Weiter'}
+            </button>
         </div>
-      )}
-    </div>
+    </motion.div>
   );
 };
 
-export default PlannerWizard;
+export { PlannerWizard };

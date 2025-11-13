@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { SearchCriteria } from '../types';
 
@@ -27,7 +26,7 @@ const Step4Time: React.FC<Step4TimeProps> = ({ criteria, setCriteria, timesOfDay
       <p className="text-center text-gray-400 mb-10">Die gewählte Zeit wird für die Wettervorhersage verwendet.</p>
       
       <div className="w-full max-w-md">
-        <p className="text-center text-2xl font-bold text-red-400 mb-4">
+        <p className="text-center text-2xl font-bold text-primary-400 mb-4">
           {criteria.timeOfDay}
         </p>
         <input
@@ -37,7 +36,7 @@ const Step4Time: React.FC<Step4TimeProps> = ({ criteria, setCriteria, timesOfDay
           max={timesOfDay.length - 1}
           value={currentIndex}
           onChange={handleSliderChange}
-          className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-red-500"
+          className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
         />
         <div className="flex justify-between text-xs text-gray-400 px-1 mt-2">
             {timesOfDay.map((time, index) => (

@@ -1,17 +1,37 @@
 import { GoogleGenAI, Type, Modality } from '@google/genai';
-import { SearchCriteria, Coordinates, PhotoSpot, WeatherData, PhotoshootPlan, PlannerCriteria, TimeSlotSuggestion, GeocodedLocation, DetailedSpotInfo, ImageAnalysis } from '../types';
+import { SearchCriteria, Coordinates, PhotoSpot, PhotoshootPlan, PlannerCriteria, GeocodedLocation, GeneratedIdea } from '../types';
 import { PHOTO_SUBJECTS } from '../constants';
 
-// Singleton instance, will be initialized by the App
-let ai: GoogleGenAI;
+// Initialize the GoogleGenAI client directly.
+// The API key is sourced from the environment variable `process.env.API_KEY`.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-export function initializeGenAI(apiKey: string) {
-    if (!apiKey) {
-        console.error("API Key is missing for GenAI initialization.");
-        return;
+const handleApiError = (error: any, context: string): Error => {
+    console.error(`Error in ${context}:`, error);
+
+    let message = `Ein unerwarteter Fehler ist bei "${context}" aufgetreten. Bitte versuche es erneut.`;
+    
+    const errorMessage = error.message?.toLowerCase() || '';
+    const errorDetails = error.toString().toLowerCase();
+    const isImageContext = context.toLowerCase().includes('bildgenerierung');
+
+    if (errorMessage.includes('api key not valid') || errorMessage.includes('api_key_invalid')) {
+        message = 'Dein API-Schlüssel ist ungültig. Bitte überprüfe deinen API-Schlüssel.';
+    } else if (isImageContext && (errorDetails.includes("billing required") || errorDetails.includes("enable billing"))) {
+        message = 'Die Bildgenerierung erfordert ein Google Cloud Projekt mit aktivierter Abrechnung. Dies ist eine Anforderung von Google, selbst wenn die Nutzung im kostenlosen Rahmen bleibt. Stelle sicher, dass die "Vertex AI API" aktiviert und mit einem Rechnungskonto verknüpft ist.';
+    } else if (errorMessage.includes('permission denied') || errorDetails.includes('permission_denied')) {
+        message = 'Zugriff verweigert. Stelle sicher, dass dein API-Schlüssel die "Vertex AI API" (für Bilder) und die "Generative Language API" (für Text) in deinem Google Cloud Projekt nutzen darf.';
+    } else if (errorMessage.includes('quota')) {
+        message = 'Du hast dein Nutzungslimit (Quota) für die API erreicht. Bitte versuche es später erneut oder überprüfe dein Google Cloud-Konto.';
+    } else if (errorDetails.includes("failed to fetch")) {
+        message = 'Netzwerkfehler. Bitte überprüfe deine Internetverbindung und versuche es erneut.'
+    } else if (errorDetails.includes("json")) {
+        message = 'Die Antwort der KI war in einem unerwarteten Format. Versuche die Anfrage leicht zu ändern.'
     }
-    ai = new GoogleGenAI({ apiKey });
-}
+    
+    return new Error(message);
+};
+
 
 const weatherSchema = {
   type: Type.OBJECT,
@@ -20,6 +40,7 @@ const weatherSchema = {
     temperature: { type: Type.NUMBER, description: "Die Temperatur in Grad Celsius." },
     precipitationChance: { type: Type.NUMBER, description: "Die Regenwahrscheinlichkeit in Prozent." },
     windSpeed: { type: Type.NUMBER, description: "Die Windgeschwindigkeit in km/h." },
+    notes: { type: Type.STRING, description: "Eine kurze Anmerkung, wie das Wetter die Fotografie an diesem Ort beeinflusst (z.B. 'Nebel sorgt für mystische Stimmung')." }
   },
   required: ['condition', 'temperature', 'precipitationChance', 'windSpeed']
 };
@@ -40,7 +61,7 @@ const photoSpotSchema = {
           coordinates: {
             type: Type.OBJECT,
             properties: {
-              lat: { type: Type.NUMBER, description: "Der Breitengrad." },
+              lat: { type: Type.NUMBER, description: "Der Breitgrad." },
               lon: { type: Type.NUMBER, description: "Der Längengrad." },
             },
             required: ['lat', 'lon']
@@ -50,9 +71,21 @@ const photoSpotSchema = {
             description: "Eine Liste von 3-5 Stichwörtern, die beschreiben, warum dieser Spot zu den Suchkriterien passt.",
             items: { type: Type.STRING }
           },
-          weather: weatherSchema
+          weather: weatherSchema,
+          keyAspects: { 
+            type: Type.ARRAY, 
+            description: "Eine Liste von 3 stichpunktartigen, fotografischen Highlights oder Besonderheiten des Ortes.",
+            items: { type: Type.STRING } 
+          },
+          bestTimeToVisit: { type: Type.STRING, description: "Die beste Tages- oder Jahreszeit für einen Besuch, mit kurzer Begründung." },
+          photoTips: {
+            type: Type.ARRAY,
+            description: "Eine Liste von 2-3 spezifischen, umsetzbaren Fotografie-Tipps für diesen Ort (Komposition, Technik usw.). Die Tipps sollen konkret sein ('Was soll ich fotografieren?'), nicht nur wo.",
+            items: { type: Type.STRING }
+          },
+          proTip: { type: Type.STRING, description: "Ein einzigartiger, sehr spezifischer 'Profi-Tipp' oder ein Geheimnis über diesen Ort, das die meisten Leute nicht kennen würden." },
         },
-        required: ['id', 'name', 'address', 'description', 'coordinates', 'matchingCriteria', 'weather']
+        required: ['id', 'name', 'address', 'description', 'coordinates', 'matchingCriteria', 'weather', 'keyAspects', 'bestTimeToVisit', 'photoTips', 'proTip']
       }
     }
   },
@@ -60,7 +93,6 @@ const photoSpotSchema = {
 };
 
 export const findPhotoSpots = async (criteria: SearchCriteria, location: Coordinates): Promise<PhotoSpot[]> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
     const prompt = `
       Finde 5-7 Foto-Spots in einem Umkreis von ${criteria.radius} km um den Standort (${location.lat}, ${location.lon}).
       Die Spots sollten zu folgenden Kriterien passen:
@@ -69,8 +101,10 @@ export const findPhotoSpots = async (criteria: SearchCriteria, location: Coordin
       - Stile/Stimmungen: ${criteria.styles.join(', ')}
       - Tageszeit: ${criteria.timeOfDay}
 
-      Gib für jeden Spot einen Namen, eine kurze Beschreibung (30-50 Wörter), die genaue und vollständige Adresse, die exakten GPS-Koordinaten (lat, lon), eine Liste mit 3-5 passenden Stichwörtern UND eine plausible Wettervorhersage für die angegebene Tageszeit an.
+      Gib für jeden Spot einen Namen, eine kurze Beschreibung (30-50 Wörter), die genaue Adresse, die exakten GPS-Koordinaten, passende Stichwörter, eine plausible Wettervorhersage, 3 fotografische Highlights ('keyAspects'), die beste Besuchszeit ('bestTimeToVisit'), 2-3 konkrete Fototipps ('photoTips') und einen einzigartigen Profi-Tipp ('proTip') an.
+      Die Wettervorhersage muss für die angegebene Tageszeit (${criteria.timeOfDay}) gelten und sollte eine Anmerkung ('notes') enthalten, wie das Wetter die Fotografie an diesem Ort beeinflusst.
       Die Beschreibung sollte kreativ und inspirierend für Fotografen/Videografen sein.
+      Die Fototipps und der Profi-Tipp müssen besonders detailliert, nützlich und umsetzbar sein. Sie sollen die Frage "Was soll ich fotografieren?" beantworten, nicht nur "Wo?".
       Stelle sicher, dass die Spots thematisch zu den angegebenen Motiven und stilen passen.
     `;
     
@@ -94,146 +128,15 @@ export const findPhotoSpots = async (criteria: SearchCriteria, location: Coordin
         return [];
 
     } catch (error) {
-        console.error("Error finding photo spots:", error);
-        throw new Error("Fehler bei der Suche nach Foto-Spots. Bitte versuche es erneut.");
+        throw handleApiError(error, "der Suche nach Foto-Spots");
     }
 };
-
-const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-
-function decode(base64: string) {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
-}
-
-
-export const getTextToSpeechAudio = async (text: string): Promise<AudioBuffer | null> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    if (!text) return null;
-    try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text: `Lies den folgenden Text auf Deutsch mit einer freundlichen, ruhigen Stimme vor: ${text}` }] }],
-            config: {
-                responseModalities: [Modality.AUDIO],
-                speechConfig: {
-                    voiceConfig: {
-                        prebuiltVoiceConfig: { voiceName: 'Puck' },
-                    },
-                },
-            },
-        });
-        
-        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (base64Audio) {
-            const audioBytes = decode(base64Audio);
-            const audioBuffer = await decodeAudioData(audioBytes, audioContext, 24000, 1);
-            return audioBuffer;
-        }
-        return null;
-    } catch (error) {
-        console.error("Error generating text-to-speech audio:", error);
-        return null;
-    }
-};
-
-export const playAudio = (audioBuffer: AudioBuffer) => {
-    if (!audioContext || !audioBuffer) return;
-    const source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
-    source.start();
-};
-
-const timeSlotSuggestionSchema = {
-    type: Type.OBJECT,
-    properties: {
-        suggestions: {
-            type: Type.ARRAY,
-            description: "Eine Liste von 3-4 optimalen Zeitfenstern.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    dateTime: { type: Type.STRING, description: "Das genaue Datum und die Uhrzeit im ISO 8601 Format (YYYY-MM-DDTHH:MM:SS)." },
-                    reason: { type: Type.STRING, description: "Eine kurze Begründung, warum dieser Zeitpunkt ideal ist (z.B. 'Klare Nacht, ideal für Sterne', 'Prognose für dramatische Wolken zum Sonnenuntergang')." }
-                },
-                required: ['dateTime', 'reason']
-            }
-        }
-    },
-    required: ['suggestions']
-};
-
-export const getTimeSlotSuggestions = async (criteria: Omit<PlannerCriteria, 'userLocation' | 'radius'> & {userLocation: Coordinates, radius: number} ): Promise<TimeSlotSuggestion[]> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    const today = new Date().toISOString().split('T')[0];
-    const prompt = `
-    Basierend auf den folgenden Kriterien für ein Fotoshooting, schlage 3-4 plausible, optimale Zeitfenster in den nächsten 7 Tagen vor.
-    Heute ist der ${today}. Deine Vorschläge sollten auf typischen, saisonalen Wetter- und Lichtverhältnissen für die angegebene Region basieren.
-
-    **Shooting-Kriterien:**
-    - **Hauptmotiv:** ${criteria.subject}
-    - **Stimmung/Stile:** ${criteria.styles.join(', ')}
-    - **Gewünschtes Wetter:** ${criteria.desiredWeather.join(', ')}
-    - **Gewünschtes Licht:** ${criteria.desiredLight.join(', ')}
-    - **Region:** Umkreis von ${criteria.radius}km um die Koordinaten ${criteria.userLocation.lat}, ${criteria.userLocation.lon}.
-
-    Gib für jeden Vorschlag das genaue Datum und die Uhrzeit im ISO-Format und eine kurze, prägnante Begründung an.
-    Die Begründung muss sich direkt auf die gewünschten Wetter- und Lichtbedingungen beziehen.
-    Beispiel: "Grund: Für diesen Zeitraum ist die Wahrscheinlichkeit für klaren Himmel am höchsten, perfekt für die gewünschte Sternenfotografie."
-    `;
-
-    let jsonStr = '';
-    try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: timeSlotSuggestionSchema,
-            },
-        });
-        jsonStr = response.text.trim();
-        const result = JSON.parse(jsonStr);
-        return result.suggestions || [];
-    } catch (error) {
-        console.error("Error getting time slot suggestions:", error);
-        if (jsonStr) {
-            console.error("Raw Gemini response that failed to parse:", jsonStr);
-        }
-        throw new Error("Fehler bei der Suche nach Terminvorschlägen.");
-    }
-};
-
 
 const photoshootPlanSchema = {
   type: Type.OBJECT,
   properties: {
     title: { type: Type.STRING, description: "Ein kreativer, packender Titel für den Shooting-Plan." },
+    dateTime: { type: Type.STRING, description: "Der von dir gewählte, optimale Zeitpunkt für das Shooting im ISO 8601 Format (YYYY-MM-DDTHH:MM:SS)." },
     spot: {
         type: Type.OBJECT,
         properties: {
@@ -284,16 +187,16 @@ const photoshootPlanSchema = {
     },
     notesAndTips: {
         type: Type.ARRAY,
-        description: "3-5 konkrete, kreative Profi-Tipps für das Shooting, die auf Ort, Zeit und Idee zugeschnitten sind.",
+        description: "3-5 konkrete, kreative Profi-Tipps für das Shooting. Diese sollen sehr spezifische Anleitungen sein, z.B. zu Kameraeinstellungen, Komposition oder unkonventionellen Perspektiven.",
         items: { type: Type.STRING }
     },
     creativeVision: {
         type: Type.STRING,
-        description: "Ein kurzer, inspirierender Text (2-3 Sätze), der die kreative Vision und Stimmung des Shootings zusammenfasst."
+        description: "Ein kurzer, inspirierender Text (2-3 Sätze), der die kreative Vision und Stimmung des Shootings zusammenfasst. Er sollte auch begründen, warum der gewählte Zeitpunkt optimal ist."
     },
     shotList: {
         type: Type.ARRAY,
-        description: "Eine Liste von 3-4 konkreten, umsetzbaren Foto-Ideen oder 'Shots' für den Ort.",
+        description: "Eine Liste von 3-4 konkreten, umsetzbaren Foto-Ideen ('Was soll ich fotografieren?'). Jeder Punkt sollte eine spezifische Szene, ein Detail oder eine Komposition beschreiben.",
         items: { type: Type.STRING }
     },
     moodImagePrompts: {
@@ -302,50 +205,45 @@ const photoshootPlanSchema = {
         items: { type: Type.STRING }
     }
   },
-  required: ['title', 'spot', 'travelPlan', 'weatherForecast', 'lightingAnalysis', 'equipmentList', 'notesAndTips', 'creativeVision', 'shotList', 'moodImagePrompts']
+  required: ['title', 'dateTime', 'spot', 'travelPlan', 'weatherForecast', 'lightingAnalysis', 'equipmentList', 'notesAndTips', 'creativeVision', 'shotList', 'moodImagePrompts']
 };
 
-export const generatePhotoshootPlan = async (criteria: PlannerCriteria, dateTime: string): Promise<PhotoshootPlan> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
+export const generatePhotoshootPlan = async (criteria: PlannerCriteria): Promise<PhotoshootPlan> => {
     const prompt = `
-    Du bist ein Experte für Fotografie-Planung und ein Creative Director. Deine Aufgabe ist es, basierend auf den Wünschen eines Nutzers den perfekten Foto-Spot zu finden und einen umfassenden, kreativen Shooting-Plan zu erstellen.
+    Du bist ein Experte für Fotografie-Planung und ein Creative Director. Deine Aufgabe ist es, einen hyper-detaillierten und umsetzbaren Shooting-Plan zu erstellen, der auf den anspruchsvollen Wünschen eines Fotografen basiert. Finde nicht nur irgendeinen Ort, sondern finde den **perfekten Moment** an dem **perfekten Ort**.
 
     **Nutzer-Kriterien:**
-    - **Standort des Nutzers:** ${criteria.userLocation.lat}, ${criteria.userLocation.lon}
-    - **Maximaler Umkreis:** ${criteria.radius} km
-    - **Geplanter Zeitpunkt:** ${dateTime}
-    - **Shooting-Idee:**
-        - Hauptmotiv: ${criteria.subject}
-        - Stile: ${criteria.styles.join(', ')}
-        - Schlüsselelemente: "${criteria.keyElements}"
-        - Gewünschtes Wetter: ${criteria.desiredWeather.join(', ')}
-        - Gewünschtes Licht: ${criteria.desiredLight.join(', ')}
+    - **Kreatives Konzept:**
+        - **Motive:** ${criteria.motivs.join(', ')}
+        - **Stile/Stimmungen:** ${criteria.styles.join(', ')}
+        - **Wichtige Elemente:** ${criteria.keyElements || 'Keine spezifischen'}
+    - **Zeitliche & Umgebungs-Anforderungen:**
+        - **Verfügbarer Zeitraum:** Von ${criteria.dateRange.start} bis ${criteria.dateRange.end}
+        - **Bevorzugtes Wetter:** ${criteria.desiredWeather?.join(', ') || 'Flexibel'}
+        - **Bevorzugtes Licht:** ${criteria.desiredLight?.join(', ') || 'Flexibel'}
+    - **Logistische Anforderungen:**
+        - **Standort des Nutzers:** ${criteria.userLocation.lat}, ${criteria.userLocation.lon}
+        - **Maximaler Umkreis:** ${criteria.radius} km
 
-    **Deine Aufgaben:**
-    1.  **Spot finden:** Finde basierend auf der Idee und den Standortdaten den EINEN am besten geeigneten Foto-Spot im angegebenen Umkreis.
-    2.  **Plan erstellen:** Erstelle einen detaillierten Plan für diesen Spot zum angegebenen Zeitpunkt.
-    3.  **Kreativkonzept entwickeln:** Füge dem Plan einen kreativen Teil hinzu.
+    **Deine Denk- und Arbeitsschritte (strikt befolgen!):**
 
-    **Der Plan muss Folgendes beinhalten:**
-    - **Organisatorischer Teil:**
-        - **Titel:** Ein kreativer Titel für den Plan.
-        - **Spot:** Name, Beschreibung (warum er passt) und Koordinaten des gefundenen Spots.
-        - **Reiseplan:** Berechne eine realistische Fahrzeit und gib eine empfohlene Abfahrtszeit an. Füge Hinweise zu Parken oder Anreise hinzu.
-        - **Wettervorhersage:** Eine detaillierte Vorhersage. Gib auch an, wie das Wetter das Shooting beeinflusst.
-        - **Lichtanalyse:** Beschreibe die Lichtverhältnisse. Falls es Nacht ist, beurteile die Lichtverschmutzung.
-        - **Ausrüstungsliste:** Empfiehl eine passende Ausrüstung.
-        - **Tipps & Hinweise:** Gib 3-5 konkrete, umsetzbare Profi-Tipps.
-    - **Kreativer Teil:**
-        - **creativeVision:** Fasse die kreative Vision in 2-3 inspirierenden Sätzen zusammen.
-        - **shotList:** Erstelle eine Liste mit 3-4 konkreten Foto-Ideen (z.B. "Weitwinkelaufnahme von unten, um die Brücke monumental wirken zu lassen").
-        - **moodImagePrompts:** Erstelle genau ZWEI verschiedene, sehr detaillierte, englische Prompts für ein KI-Bildmodell (wie DALL-E oder Midjourney), die die Stimmung visualisieren. Zum Beispiel: "cinematic photo, a lone figure standing on a misty bridge at dawn, golden hour light breaking through the fog, moody atmosphere, highly detailed, 35mm lens --ar 16:9".
+    1.  **Saisonale Analyse:** Analysiere den angegebenen Zeitraum (von ${criteria.dateRange.start} bis ${criteria.dateRange.end}). Bestimme die exakte Jahreszeit und die typischen Gegebenheiten dieser Zeit in der Region (z.B. "Spätherbst, kahle Bäume, tief stehende Sonne, hohe Wahrscheinlichkeit für Nebel am Morgen"). **Alle deine Vorschläge MÜSSEN zu dieser Jahreszeit passen.** Schlage keine blühenden Kirschbäume im November vor.
 
-    Sei kreativ, präzise und hilfreich.
+    2.  **Kandidaten-Suche:** Finde basierend auf allen Kriterien (Motive, Stile, Jahreszeit, Umkreis) mental 2-3 potenzielle Orte.
+
+    3.  **Moment-Optimierung (WICHTIGSTER SCHRITT):** Für jeden Kandidaten-Ort, simuliere die Wetter- und Lichtbedingungen innerhalb des verfügbaren Zeitraums. Vergleiche diese Simulation mit den gewünschten Wetter- und Lichtbedingungen des Nutzers. **Wähle den EINEN Spot und den EINEN genauen Zeitpunkt (Datum und Uhrzeit), der die höchste Übereinstimmung zwischen der Realität (Saison, Ort) und der Vision (Wetter, Licht, Stil) des Nutzers bietet.**
+
+    4.  **Plan-Erstellung:** Erstelle den finalen Plan basierend auf deiner Wahl aus Schritt 3.
+        - **Begründe deine Wahl:** Erkläre im "Creative Vision"-Feld kurz, warum genau dieser Ort zu genau diesem Zeitpunkt perfekt ist.
+        - **Sei hyper-spezifisch:** Deine Tipps und Shot-Listen müssen extrem konkret sein. Nicht "Fotografiere den See", sondern "Positioniere dich am Nordufer eine halbe Stunde vor Sonnenaufgang. Nutze einen Polfilter, um die Spiegelung der nebelverhangenen Berge im Wasser einzufangen. Belichtungszeit ca. 15 Sekunden bei f/11."
+        - **Fülle ALLE Felder des JSON-Schemas** mit kreativen, nützlichen und auf deiner Analyse basierenden Informationen. Der \`dateTime\` Wert muss der von dir in Schritt 3 ermittelte optimale Zeitpunkt sein.
+
+    Gib das Ergebnis ausschließlich im geforderten JSON-Format zurück.
     `;
-
+    
     try {
-         const response = await ai.models.generateContent({
-            model: "gemini-2.5-pro",
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -353,29 +251,33 @@ export const generatePhotoshootPlan = async (criteria: PlannerCriteria, dateTime
                 temperature: 0.8,
             },
         });
-        
-        const jsonStr = response.text.trim();
-        const plan = JSON.parse(jsonStr);
-        return plan as PhotoshootPlan;
-    } catch (error) {
-        console.error("Error generating photoshoot plan:", error);
-        throw new Error("Fehler bei der Erstellung des Shooting-Plans.");
-    }
-}
 
-const geocodeSchema = {
-  type: Type.OBJECT,
-  properties: {
-    lat: { type: Type.NUMBER, description: "Der Breitengrad." },
-    lon: { type: Type.NUMBER, description: "Der Längengrad." },
-    name: { type: Type.STRING, description: "Der von der API verifizierte Name des Ortes, z.B. 'Berlin, Deutschland'."}
-  },
-  required: ['lat', 'lon', 'name']
+        const jsonStr = response.text.trim();
+        const result = JSON.parse(jsonStr);
+
+        if (result) {
+            return result as PhotoshootPlan;
+        }
+        
+        throw new Error("Konnte keinen validen Plan von der KI erhalten.");
+
+    } catch (error) {
+        throw handleApiError(error, "der Erstellung des Shooting-Plans");
+    }
 };
 
-export const geocodeLocation = async (locationString: string): Promise<GeocodedLocation> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    const prompt = `Wandle den folgenden Ort in geografische Koordinaten um: "${locationString}". Gib auch den verifizierten Namen des Ortes an. Antworte nur mit einem JSON-Objekt, das 'lat', 'lon' und 'name' enthält.`;
+const geocodeSchema = {
+    type: Type.OBJECT,
+    properties: {
+        name: { type: Type.STRING, description: "Der verifizierte Name des Ortes (z.B. 'Berlin, Deutschland')." },
+        lat: { type: Type.NUMBER, description: "Der Breitgrad." },
+        lon: { type: Type.NUMBER, description: "Der Längengrad." },
+    },
+    required: ['name', 'lat', 'lon']
+};
+
+export const geocodeLocation = async (address: string): Promise<GeocodedLocation> => {
+    const prompt = `Geocodiere die folgende Adresse und gib den verifizierten Namen und die genauen GPS-Koordinaten (lat, lon) zurück: "${address}"`;
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
@@ -386,273 +288,150 @@ export const geocodeLocation = async (locationString: string): Promise<GeocodedL
             },
         });
         const jsonStr = response.text.trim();
-        const result = JSON.parse(jsonStr);
-        if (result && typeof result.lat === 'number' && typeof result.lon === 'number' && typeof result.name === 'string') {
-            return result as GeocodedLocation;
-        }
-        throw new Error("Ungültige Antwort vom Geocoding-Service erhalten.");
+        return JSON.parse(jsonStr) as GeocodedLocation;
     } catch (error) {
-        console.error("Error geocoding location:", error);
-        throw new Error("Der Ort konnte nicht gefunden werden. Bitte versuche es genauer.");
+        throw handleApiError(error, "der Adress-Suche (Geocoding)");
     }
 };
 
-const reverseGeocodeSchema = {
-    type: Type.OBJECT,
-    properties: {
-      name: { type: Type.STRING, description: "Der Name des Ortes (Stadt, Land) basierend auf den Koordinaten."}
-    },
-    required: ['name']
-};
-  
 export const reverseGeocode = async (coords: Coordinates): Promise<string> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    const prompt = `Gib den Namen des Ortes (z.B. 'Berlin, Deutschland') für die folgenden geografischen Koordinaten zurück: Breitengrad ${coords.lat}, Längengrad ${coords.lon}. Antworte nur mit einem JSON-Objekt, das 'name' enthält.`;
+    const prompt = `Finde den nächstgelegenen Ort oder die Stadt für die GPS-Koordinaten: Breitengrad ${coords.lat}, Längengrad ${coords.lon}. Gib nur den Namen zurück (z.B. "München, Bayern").`;
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: reverseGeocodeSchema,
-            },
         });
-        const jsonStr = response.text.trim();
-        const result = JSON.parse(jsonStr);
-        if (result && typeof result.name === 'string') {
-            return result.name;
-        }
-        throw new Error("Ungültiger Ortsname vom Service erhalten.");
+        return response.text.trim();
     } catch (error) {
-        console.error("Error reverse geocoding location:", error);
-        // Fallback, return coordinates if name resolution fails
-        return `${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}`;
+        throw handleApiError(error, "der Standortermittlung (Reverse Geocoding)");
     }
-}
-
-const ideaStarterSchema = {
-  type: Type.OBJECT,
-  properties: {
-    starters: {
-      type: Type.ARRAY,
-      description: "Eine Liste von 4 kreativen und vielfältigen Ideen für ein Fotoshooting.",
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING, description: "Ein kurzer, packender Titel für die Idee." },
-          description: { type: Type.STRING, description: "Eine inspirierende Beschreibung der Idee in 1-2 Sätzen." },
-          subject: { type: Type.STRING, description: `Eines der folgenden Hauptmotive: ${PHOTO_SUBJECTS.join(', ')}` },
-          styles: { type: Type.ARRAY, description: "Eine Liste von 2-3 passenden Stilen/Stimmungen.", items: { type: Type.STRING } },
-          keyElements: { type: Type.STRING, description: "Ein kurzes Beispiel für Schlüsselelemente." }
-        },
-        required: ['title', 'description', 'subject', 'styles', 'keyElements']
-      }
-    }
-  },
-  required: ['starters']
 };
 
-export const getNewIdeaStarters = async (): Promise<any[]> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    const prompt = `
-      Erstelle 4 neue, kreative, abwechslungsreiche und inspirierende "Idea Starters" für einen Fotografie-Planer.
-      Die Ideen sollten verschiedene Motive und Stimmungen abdecken.
-      Vermeide generische Ideen. Sei spezifisch und ausgefallen.
-      Gib für jede Idee einen Titel, eine kurze Beschreibung, ein Hauptmotiv (aus der Liste: ${PHOTO_SUBJECTS.join(', ')}), 2-3 passende Stile und beispielhafte Schlüsselelemente an.
-    `;
-    try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-pro",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: ideaStarterSchema,
-                temperature: 0.9,
-            },
-        });
-        const jsonStr = response.text.trim();
-        const result = JSON.parse(jsonStr);
-        return result.starters || [];
-    } catch (error) {
-        console.error("Error getting new idea starters:", error);
-        throw new Error("Fehler beim Generieren neuer Ideen.");
+const _generateSingleImage = async (prompt: string): Promise<string> => {
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: { parts: [{ text: prompt }] },
+        config: {
+            responseModalities: [Modality.IMAGE],
+        },
+    });
+    
+    for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+            return part.inlineData.data;
+        }
     }
+    throw new Error("Keine Bilddaten in der Antwort gefunden.");
+};
+
+export const generateSpotImage = async (spotName: string, description: string): Promise<string> => {
+    const prompt = `Generate a highly realistic, photorealistic image that looks like a high-quality photograph taken by a professional photographer of the location known as "${spotName}". The scene must accurately reflect the description: "${description}". Avoid any artistic, drawn, or stylized elements. The goal is to show what the place actually looks like in a beautiful, well-composed shot.`;
+    
+    try {
+        return await _generateSingleImage(prompt);
+    } catch (error) {
+        throw handleApiError(error, "der Bildgenerierung");
+    }
+};
+
+export const generateMoodImages = async (prompts: string[]): Promise<(string | null)[]> => {
+    const imagePromises = prompts.map(async (prompt) => {
+        try {
+            return await _generateSingleImage(prompt);
+        } catch (error) {
+            console.error(`Failed to generate mood image for prompt: "${prompt}"`, error);
+            // Re-throw the handled error to be caught by allSettled
+            throw handleApiError(error, `der Bildgenerierung für das Moodboard`);
+        }
+    });
+
+    const results = await Promise.allSettled(imagePromises);
+    
+    // Process results to return image data or null for failures
+    return results.map(res => {
+        if (res.status === 'fulfilled') {
+            return res.value;
+        }
+        // Optionally, you could return the error message here instead of null
+        // if you want to display it in the UI.
+        console.error("A mood image generation failed:", res.reason);
+        return null; 
+    });
 };
 
 export const getFollowUpAnswer = async (plan: PhotoshootPlan, question: string): Promise<string> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
+    const context = JSON.stringify(plan);
     const prompt = `
-    Du bist ein virtueller Foto-Assistent und Experte für Fotografie-Planung.
-    Basierend auf dem folgenden, bereits erstellten Shooting-Plan, beantworte die spezifische Frage des Nutzers.
-    Sei dabei besonders hilfreich und gehe auch auf technische Details ein, wenn danach gefragt wird (z.B. Objektive, Kameraeinstellungen, Bildkomposition).
-    Antworte kurz, präzise und direkt auf die Frage.
+      Du bist ein virtueller Foto-Assistent. Ein Nutzer hat bereits einen detaillierten Shooting-Plan erhalten.
+      **Hier ist der Kontext des Plans:**
+      ${context}
 
-    **Bestehender Shooting-Plan:**
-    ${JSON.stringify(plan, null, 2)}
+      **Der Nutzer hat nun folgende Folgefrage:**
+      "${question}"
 
-    **Frage des Nutzers:**
-    "${question}"
-
-    Deine Expertenantwort:
-    `;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-pro",
-            contents: prompt,
-            config: {
-                temperature: 0.5,
-            },
-        });
-
-        return response.text.trim();
-    } catch (error) {
-        console.error("Error getting follow-up answer:", error);
-        throw new Error("Fehler bei der Beantwortung der Frage. Bitte versuche es erneut.");
-    }
-};
-
-const spotDetailSchema = {
-    type: Type.OBJECT,
-    properties: {
-        address: { type: Type.STRING, description: "Die vollständige, genaue Adresse des Ortes." },
-        summary: { type: Type.STRING, description: "Eine kurze Zusammenfassung (ca. 50-70 Wörter), was diesen Ort fotografisch besonders macht." },
-        keyAspects: { 
-            type: Type.ARRAY, 
-            description: "Eine Liste von 3-4 stichpunktartigen, fotografischen Highlights oder Tipps (z.B. 'Perfekt für dramatische Sonnenuntergänge', 'Spiegelungen im Wasser nutzen').",
-            items: { type: Type.STRING } 
-        },
-        travelInfo: {
-            type: Type.OBJECT,
-            properties: {
-                parking: { type: Type.STRING, description: "Kurze Info zu Parkmöglichkeiten." },
-                publicTransport: { type: Type.STRING, description: "Kurze Info zur Anbindung an öffentliche Verkehrsmittel." }
-            },
-            required: ["parking", "publicTransport"]
-        },
-        bestTimeToVisit: { type: Type.STRING, description: "Die beste Tages- oder Jahreszeit für einen Besuch, mit kurzer Begründung." },
-        imagePrompt: { type: Type.STRING, description: "Ein detaillierter, englischer Prompt für ein KI-Bildgenerierungsmodell (z.B. DALL-E), der die Essenz und Stimmung dieses Ortes einfängt. Der Prompt sollte den Fotostil, das Motiv, die Lichtstimmung und wichtige Details enthalten." }
-    },
-    required: ["address", "summary", "keyAspects", "travelInfo", "bestTimeToVisit", "imagePrompt"]
-};
-
-
-export const getSpotDetails = async (spot: PhotoSpot): Promise<DetailedSpotInfo> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    const prompt = `
-    Du bist ein Location Scout für Fotografen. Für den folgenden Ort "${spot.name}" (bekannte Adresse: ${spot.address}), erstelle eine strukturierte, leicht verdauliche Zusammenfassung.
-    - **address:** Überprüfe und gib die genaue, vollständige Adresse zurück.
-    - **summary:** Eine kurze Zusammenfassung (ca. 50-70 Wörter), was diesen Ort fotografisch besonders macht.
-    - **keyAspects:** Eine Liste von 3-4 stichpunktartigen, fotografischen Highlights.
-    - **travelInfo:** Ein Objekt mit kurzen Infos zu 'parking' und 'publicTransport'.
-    - **bestTimeToVisit:** Die beste Zeit für einen Besuch mit kurzer Begründung.
-    - **imagePrompt:** Erstelle einen detaillierten, englischen Prompt für ein KI-Bildgenerierungsmodell, der die Essenz des Ortes einfängt (Stil, Motiv, Licht).
+      Beantworte die Frage kurz, präzise und hilfreich im Kontext des Plans. Gib nur die Antwort aus, ohne einleitende Sätze wie "Als virtueller Assistent...".
     `;
 
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: spotDetailSchema,
-            },
         });
-        const jsonStr = response.text.trim();
-        const result = JSON.parse(jsonStr);
-        return result as DetailedSpotInfo;
+        return response.text.trim();
     } catch (error) {
-        console.error("Error getting spot details:", error);
-        throw new Error("Details für diesen Spot konnten nicht geladen werden.");
-    }
-}
-
-export const generateImageForSpot = async (prompt: string): Promise<string | null> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    if (!prompt) return null;
-    try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: {
-            parts: [{ text: prompt }],
-          },
-          config: {
-              responseModalities: [Modality.IMAGE],
-          },
-        });
-        const part = response.candidates?.[0]?.content?.parts?.[0];
-        if (part && part.inlineData) {
-            return part.inlineData.data;
-        }
-        return null;
-    } catch (error) {
-        console.error("Error generating image:", error);
-        return null; 
-    }
-}
-
-export const generateMoodImages = async (prompts: string[]): Promise<(string | null)[]> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    if (!prompts || prompts.length === 0) return [];
-    
-    const imagePromises = prompts.map(prompt => generateImageForSpot(prompt));
-    
-    try {
-        const results = await Promise.all(imagePromises);
-        return results;
-    } catch (error) {
-        console.error("Error generating mood images:", error);
-        // Return an array of nulls matching the prompt count on failure
-        return prompts.map(() => null);
+        throw handleApiError(error, "der Beantwortung deiner Frage");
     }
 };
 
-const imageAnalysisSchema = {
+const creativeIdeaSchema = {
     type: Type.OBJECT,
     properties: {
-      photographicElements: {
-        type: Type.ARRAY,
-        description: "Eine Liste von 3 wichtigen fotografischen Elementen, die im Bild zu sehen sind (z.B. Komposition, Licht, Stimmung).",
-        items: { type: Type.STRING }
-      },
-      colorPalette: {
-        type: Type.ARRAY,
-        description: "Eine Liste von 5 dominanten Farben aus dem Bild, als Hex-Codes (z.B. '#AABBCC').",
-        items: { type: Type.STRING }
-      }
+        ideas: {
+            type: Type.ARRAY,
+            description: "Eine Liste von 3 kreativen Foto-Ideen.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING, description: "Ein kurzer, packender Titel für die Idee." },
+                    description: { type: Type.STRING, description: "Eine kurze, inspirierende Beschreibung (1-2 Sätze)." },
+                    styles: {
+                        type: Type.ARRAY,
+                        description: "Eine Liste von 2-3 passenden Stilen oder Stimmungen.",
+                        items: { type: Type.STRING }
+                    },
+                    keyElements: { type: Type.STRING, description: "Ein kurzes Beispiel für wichtige Elemente im Bild." }
+                },
+                required: ['title', 'description', 'styles', 'keyElements']
+            }
+        }
     },
-    required: ['photographicElements', 'colorPalette']
+    required: ['ideas']
 };
 
-export const analyzeImage = async (imageBase64: string): Promise<ImageAnalysis> => {
-    if (!ai) throw new Error("GenAI client not initialized. Please set API Key.");
-    const prompt = `Analysiere dieses Bild aus der Perspektive eines Fotografen. Identifiziere die 3 wichtigsten fotografischen Elemente (wie Komposition, Beleuchtung, Stimmung). Extrahiere außerdem die 5 dominantesten Farben als Hex-Farbcode.`;
-    
+
+export const generateCreativeIdeas = async (motivs: string[]): Promise<GeneratedIdea[]> => {
+    const prompt = `
+      Erstelle 3 verschiedene, kreative und spezifische Fotoshooting-Ideen basierend auf den folgenden Motiven: ${motivs.join(', ')}.
+      Die Ideen sollten einzigartiger sein als einfache Konzepte wie "Landschaft bei Sonnenuntergang".
+      Gib für jede Idee einen einprägsamen Titel, eine kurze Beschreibung, 2-3 passende Stile/Stimmungen und ein Beispiel für Schlüsselelemente an.
+    `;
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: {
-                parts: [
-                    {
-                        inlineData: {
-                            data: imageBase64,
-                            mimeType: 'image/png'
-                        }
-                    },
-                    { text: prompt }
-                ]
-            },
+            model: "gemini-2.5-flash",
+            contents: prompt,
             config: {
                 responseMimeType: "application/json",
-                responseSchema: imageAnalysisSchema
-            }
+                responseSchema: creativeIdeaSchema,
+            },
         });
         const jsonStr = response.text.trim();
         const result = JSON.parse(jsonStr);
-        return result as ImageAnalysis;
 
+        if (result && result.ideas) {
+            return result.ideas as GeneratedIdea[];
+        }
+        return [];
     } catch (error) {
-        console.error("Error analyzing image:", error);
-        throw new Error("Bildanalyse fehlgeschlagen.");
+        throw handleApiError(error, "der Generierung neuer Ideen");
     }
 };

@@ -27,7 +27,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onLogin, onClose }) => {
               Username
             </label>
             <input
-              className="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 border-gray-600 text-white leading-tight focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 border-gray-600 text-white leading-tight focus:outline-none focus:ring-2 focus:ring-primary-500"
               id="username"
               type="text"
               placeholder="Dein Username"
@@ -40,7 +40,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onLogin, onClose }) => {
               Passwort (optional)
             </label>
             <input
-              className="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 border-gray-600 text-white mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 border-gray-600 text-white mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-primary-500"
               id="password"
               type="password"
               placeholder="******************"
@@ -51,7 +51,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onLogin, onClose }) => {
           </div>
           <div className="flex items-center justify-between">
             <button
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors disabled:bg-gray-500"
+              className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors disabled:bg-gray-500"
               type="submit"
               disabled={!username.trim()}
             >
