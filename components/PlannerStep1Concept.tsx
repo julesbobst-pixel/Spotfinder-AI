@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { PlannerCriteria, GeneratedIdea } from '../types';
 import { MOTIVS, DYNAMIC_STYLES } from '../constants';
@@ -7,9 +8,10 @@ import { SparklesIcon, SolidCheckCircleIcon } from './icons/CardIcons';
 interface Props {
   criteria: Partial<PlannerCriteria>;
   setCriteria: React.Dispatch<React.SetStateAction<Partial<PlannerCriteria>>>;
+  isOffline: boolean;
 }
 
-const PlannerStep1Concept: React.FC<Props> = ({ criteria, setCriteria }) => {
+const PlannerStep1Concept: React.FC<Props> = ({ criteria, setCriteria, isOffline }) => {
   const [ideas, setIdeas] = useState<GeneratedIdea[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
@@ -117,8 +119,9 @@ const PlannerStep1Concept: React.FC<Props> = ({ criteria, setCriteria }) => {
       <div className="mb-6">
         <button
             onClick={handleGenerateIdeas}
-            disabled={!criteria.motivs || criteria.motivs.length === 0 || isGenerating}
+            disabled={!criteria.motivs || criteria.motivs.length === 0 || isGenerating || isOffline}
             className="w-full max-w-md mx-auto px-6 py-3 bg-accent text-gray-900 font-bold rounded-lg hover:bg-accent-focus transition-all disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-3 text-lg"
+            title={isOffline ? "Du musst online sein, um Ideen zu generieren." : ""}
         >
             <SparklesIcon className="w-6 h-6" />
             {isGenerating ? 'Moment, die Muse küsst...' : 'Inspirations-Funke zünden'}

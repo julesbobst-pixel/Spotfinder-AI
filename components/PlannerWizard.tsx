@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { PlannerCriteria, Coordinates } from '../types';
 import PlannerStep1Concept from './PlannerStep1Concept';
@@ -13,10 +14,11 @@ interface PlannerWizardProps {
   criteria: Partial<PlannerCriteria>;
   setCriteria: React.Dispatch<React.SetStateAction<Partial<PlannerCriteria>>>;
   onGeneratePlan: () => void;
+  isOffline: boolean;
 }
 
 const PlannerWizard: React.FC<PlannerWizardProps> = ({ 
-    step, setStep, criteria, setCriteria, onGeneratePlan 
+    step, setStep, criteria, setCriteria, onGeneratePlan, isOffline
 }) => {
   const handleNext = () => {
     navigator.vibrate?.(50);
@@ -28,6 +30,7 @@ const PlannerWizard: React.FC<PlannerWizardProps> = ({
   };
 
   const isNextDisabled = () => {
+    if (isOffline) return true;
     switch(step) {
         case 1: return !criteria.motivs || criteria.motivs.length === 0;
         case 2: return !criteria.dateRange?.start || !criteria.dateRange?.end;
@@ -39,7 +42,7 @@ const PlannerWizard: React.FC<PlannerWizardProps> = ({
   const renderStep = () => {
     switch (step) {
       case 1:
-        return <PlannerStep1Concept criteria={criteria} setCriteria={setCriteria} />;
+        return <PlannerStep1Concept criteria={criteria} setCriteria={setCriteria} isOffline={isOffline} />;
       case 2:
         return <PlannerStep2DateTime criteria={criteria} setCriteria={setCriteria} />;
       case 3:
@@ -47,7 +50,8 @@ const PlannerWizard: React.FC<PlannerWizardProps> = ({
                     radius={criteria.radius || 25}
                     onRadiusChange={(r) => setCriteria(prev => ({...prev, radius: r}))} 
                     setUserLocation={(loc: Coordinates | null) => setCriteria(prev => ({...prev, userLocation: loc || undefined}))} 
-                    maxRadius={MAX_RADIUS} 
+                    maxRadius={MAX_RADIUS}
+                    isOffline={isOffline}
                 />;
       default:
         return null;

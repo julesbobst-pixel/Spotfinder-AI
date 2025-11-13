@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { SearchCriteria, Coordinates, PhotoSpot, User, UserData, PhotoshootPlan, PlannerCriteria, ImageState } from './types';
 import { findPhotoSpots, generatePhotoshootPlan, geocodeLocation, generateSpotImage } from './services/geminiService';
@@ -82,7 +83,34 @@ const App: React.FC = () => {
   const [userData, setUserData] = useState<UserData>({ favorites: [], visited: [], savedPlans: [] });
   const [isAddSpotModalOpen, setIsAddSpotModalOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; id: number } | null>(null);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
+
+  // Handle online/offline status
+  useEffect(() => {
+    const handleOnline = () => {
+        setIsOffline(false);
+        showToast('Du bist wieder online!');
+    };
+    const handleOffline = () => {
+        setIsOffline(true);
+        setView('profile'); // Force profile view when offline
+        showToast('Du bist offline. Nur gespeicherte Daten sind verfügbar.');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Initial check
+    if (isOffline) {
+        setView('profile');
+    }
+
+    return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Load user data from localStorage on mount
   useEffect(() => {
@@ -151,18 +179,22 @@ const App: React.FC = () => {
     });
   }, []);
 
+  const hardReset = useCallback(() => {
+    if (isOffline) {
+        setView('profile');
+        return;
+    }
+    resetQuickSearch();
+    resetPlannerState();
+    setMode('quick');
+  }, [isOffline, resetQuickSearch, resetPlannerState]);
+
   const handleModeChange = (newMode: 'quick' | 'planner') => {
     if (mode === newMode) return;
     navigator.vibrate?.(50);
     hardReset();
     setMode(newMode);
   }
-
-  const hardReset = useCallback(() => {
-    resetQuickSearch();
-    resetPlannerState();
-    setMode('quick');
-  }, [resetQuickSearch, resetPlannerState]);
 
   // This effect ensures the app starts fresh on every "open" (component mount).
   useEffect(() => {
@@ -197,6 +229,9 @@ const App: React.FC = () => {
   
   const handleSaveNewSpot = async (spotData: { name: string; address: string; description: string }) => {
     const { name, address, description } = spotData;
+    if (isOffline) {
+        throw new Error("Du musst online sein, um einen neuen Ort zu geocodieren und zu speichern.");
+    }
     const geocoded = await geocodeLocation(address);
     
     const newSpot: PhotoSpot = {
@@ -231,6 +266,7 @@ const App: React.FC = () => {
   };
   
   const isNextDisabled = (): boolean => {
+    if (isOffline) return true;
     switch(currentStep) {
         case 1: return criteria.motivs.length === 0;
         case 2: return !userLocation;
@@ -241,6 +277,10 @@ const App: React.FC = () => {
   }
 
   const handleSearch = async () => {
+    if (isOffline) {
+        setError('Du bist offline. Bitte stelle eine Internetverbindung her, um zu suchen.');
+        return;
+    }
     if (!userLocation) {
       setError('Bitte gib deinen Standort an.');
       setCurrentStep(2);
@@ -271,6 +311,10 @@ const App: React.FC = () => {
   };
 
   const handleLoadImage = useCallback(async (spotId: string, spotName: string, description: string) => {
+    if (isOffline) {
+        setImageStates(prev => ({ ...prev, [spotId]: { isLoading: false, image: null, error: 'Bilder können offline nicht geladen werden.', progress: 0 } }));
+        return;
+    }
     let progressInterval: number;
     
     // Start "fake" progress
@@ -299,10 +343,14 @@ const App: React.FC = () => {
       window.clearInterval(progressInterval);
       setImageStates(prev => ({ ...prev, [spotId]: { isLoading: false, image: null, error: e.message || 'Bild konnte nicht geladen werden.', progress: 0 } }));
     }
-  }, []);
+  }, [isOffline]);
   
   // --- PLANNER HANDLERS ---
   const handleGeneratePlan = async () => {
+    if (isOffline) {
+        setError('Du bist offline. Bitte stelle eine Internetverbindung her, um einen Plan zu erstellen.');
+        return;
+    }
     if (!plannerCriteria.userLocation) {
         setError("Bitte gib zuerst deinen Standort an.");
         return;
@@ -360,6 +408,7 @@ const App: React.FC = () => {
         onToggleVisited={handleToggleVisited}
         imageStates={imageStates}
         onLoadImage={handleLoadImage}
+        isOffline={isOffline}
       />;
     }
     
@@ -375,6 +424,7 @@ const App: React.FC = () => {
             onAddNewSpot={() => setIsAddSpotModalOpen(true)}
             imageStates={imageStates}
             onLoadImage={handleLoadImage}
+            isOffline={isOffline}
         />
     }
 
@@ -388,6 +438,7 @@ const App: React.FC = () => {
                      onRadiusChange={(r) => setCriteria(prev => ({ ...prev, radius: r }))}
                      setUserLocation={setUserLocation} 
                      maxRadius={MAX_RADIUS} 
+                     isOffline={isOffline}
                    />;
           case 3:
             return <Step3Style criteria={criteria} setCriteria={setCriteria} styles={DYNAMIC_STYLES} />;
@@ -440,11 +491,12 @@ const App: React.FC = () => {
         criteria={plannerCriteria}
         setCriteria={setPlannerCriteria}
         onGeneratePlan={handleGeneratePlan}
+        isOffline={isOffline}
     />;
   }
   
   const renderContent = () => {
-    if (isLoading) {
+    if (isLoading && !isOffline) {
       return (
         <div className="text-center">
           <LoadingSpinner />
@@ -458,8 +510,14 @@ const App: React.FC = () => {
   };
   
   return (
-    <div className="min-h-screen text-white font-sans flex flex-col items-center relative safe-area-padding">
-       <AnimatePresence>
+    <div className="min-h-screen text-white font-sans flex flex-col items-center relative">
+        {isOffline && (
+            <div className="w-full text-center bg-yellow-600 text-black p-2 text-sm font-semibold sticky top-0 z-50">
+                Du bist offline. Nur gespeicherte Daten sind verfügbar.
+            </div>
+        )}
+       <div className="w-full flex-grow flex flex-col items-center safe-area-padding">
+        <AnimatePresence>
             {toast && (
                 <motion.div
                     key={toast.id}
@@ -482,7 +540,7 @@ const App: React.FC = () => {
             </div>
         </header>
 
-        <div className="w-full max-w-2xl mx-auto flex justify-center items-center mb-8 futuristic-bg p-1.5 rounded-xl futuristic-border">
+        <div className={`w-full max-w-2xl mx-auto flex justify-center items-center mb-8 futuristic-bg p-1.5 rounded-xl futuristic-border ${isOffline ? 'opacity-50 pointer-events-none' : ''}`}>
             <button onClick={() => handleModeChange('quick')} className={`w-1/2 text-center py-2.5 rounded-lg font-semibold transition-all ${mode === 'quick' ? 'bg-primary-600 text-white shadow-lg' : 'hover:bg-white/5'}`}>
                 Schnellsuche
             </button>
@@ -501,8 +559,10 @@ const App: React.FC = () => {
             <AddSpotModal
                 onClose={() => setIsAddSpotModalOpen(false)}
                 onSave={handleSaveNewSpot}
+                isOffline={isOffline}
             />
         )}
+       </div>
     </div>
   );
 };

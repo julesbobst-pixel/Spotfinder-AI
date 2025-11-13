@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Coordinates, GeocodedLocation } from '../types';
 import { geocodeLocation, reverseGeocode } from '../services/geminiService';
@@ -8,11 +9,12 @@ interface Step2LocationProps {
   onRadiusChange: (radius: number) => void;
   setUserLocation: (location: Coordinates | null) => void;
   maxRadius: number;
+  isOffline: boolean;
 }
 
 const LAST_LOCATION_KEY = 'spotfinder_last_location';
 
-const Step2Location: React.FC<Step2LocationProps> = ({ radius, onRadiusChange, setUserLocation, maxRadius }) => {
+const Step2Location: React.FC<Step2LocationProps> = ({ radius, onRadiusChange, setUserLocation, maxRadius, isOffline }) => {
   const [locationStatus, setLocationStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('Wir brauchen deinen Standort, um Spots in der Nähe zu finden.');
   
@@ -119,7 +121,7 @@ const Step2Location: React.FC<Step2LocationProps> = ({ radius, onRadiusChange, s
     <div className="flex flex-col items-center w-full">
       <h2 className="text-3xl font-bold mb-4 text-center">Wo befindest du dich?</h2>
       <div className={`w-full max-w-md text-center text-sm mb-6 h-10 flex items-center justify-center transition-colors ${getStatusColor()}`}>
-        <p>{statusMessage}</p>
+        <p>{isOffline ? "Du bist offline. Standortsuche nicht verfügbar." : statusMessage}</p>
       </div>
 
       <div className="w-full max-w-sm flex flex-col sm:flex-row gap-4">
@@ -134,7 +136,7 @@ const Step2Location: React.FC<Step2LocationProps> = ({ radius, onRadiusChange, s
         )}
         <button
             onClick={handleLocationClick}
-            disabled={locationStatus === 'loading'}
+            disabled={locationStatus === 'loading' || isOffline}
             className={`w-full px-6 py-3 text-lg font-semibold rounded-lg transition-all flex items-center justify-center
             ${locationStatus === 'success' ? 'bg-green-600 hover:bg-green-700' : 'bg-primary-600 hover:bg-primary-700'}
             disabled:bg-gray-600 disabled:cursor-wait`}
@@ -156,10 +158,11 @@ const Step2Location: React.FC<Step2LocationProps> = ({ radius, onRadiusChange, s
                 onChange={(e) => setManualInput(e.target.value)}
                 placeholder="PLZ, Stadt oder Adresse eingeben"
                 className="flex-grow shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 border-gray-600 text-white leading-tight focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={isOffline}
             />
             <button 
                 type="submit" 
-                disabled={isGeocoding || !manualInput}
+                disabled={isGeocoding || !manualInput || isOffline}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
             >
                 {isGeocoding ? <SpinnerIcon /> : 'Suchen'}

@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { UserData, User, PhotoSpot, Coordinates, ImageState } from '../types';
 import SpotCard from './SpotCard';
@@ -15,6 +16,7 @@ interface ProfileProps {
     onAddNewSpot: () => void;
     imageStates: { [spotId: string]: ImageState };
     onLoadImage: (spotId: string, spotName: string, description: string) => void;
+    isOffline: boolean;
 }
 
 const getDistance = (coords1: Coordinates, coords2: Coordinates): number => {
@@ -49,7 +51,7 @@ const TabButton: React.FC<{ isActive: boolean; onClick: () => void; children: Re
 );
 
 
-const Profile: React.FC<ProfileProps> = ({ userData, currentUser, userLocation, onToggleFavorite, onToggleVisited, onDeletePlan, setView, onAddNewSpot, imageStates, onLoadImage }) => {
+const Profile: React.FC<ProfileProps> = ({ userData, currentUser, userLocation, onToggleFavorite, onToggleVisited, onDeletePlan, setView, onAddNewSpot, imageStates, onLoadImage, isOffline }) => {
     const [activeTab, setActiveTab] = useState<'favorites' | 'visited'>('favorites');
     const [expandedSpotId, setExpandedSpotId] = useState<string | null>(null);
 
@@ -78,7 +80,12 @@ const Profile: React.FC<ProfileProps> = ({ userData, currentUser, userLocation, 
         <div className="w-full max-w-4xl mx-auto">
             <div className="mb-8 flex justify-between items-center">
                 <h2 className="text-3xl font-bold">Mein Profil</h2>
-                 <button onClick={() => setView('search')} className="px-4 py-2 bg-gray-700/50 border border-gray-600 text-white rounded-lg hover:bg-gray-600/50 transition-all">
+                 <button 
+                    onClick={() => setView('search')} 
+                    disabled={isOffline}
+                    className="px-4 py-2 bg-gray-700/50 border border-gray-600 text-white rounded-lg hover:bg-gray-600/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={isOffline ? "Du musst online sein, um eine neue Suche zu starten." : "Neue Suche starten"}
+                 >
                     Neue Suche starten
                 </button>
             </div>
@@ -95,7 +102,12 @@ const Profile: React.FC<ProfileProps> = ({ userData, currentUser, userLocation, 
                         </TabButton>
                     </div>
                      {activeTab === 'visited' && (
-                        <button onClick={() => { navigator.vibrate?.(50); onAddNewSpot(); }} className="mb-1 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-all">
+                        <button 
+                            onClick={() => { navigator.vibrate?.(50); onAddNewSpot(); }} 
+                            className="mb-1 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-all disabled:opacity-50"
+                            disabled={isOffline}
+                            title={isOffline ? "Du musst online sein, um einen neuen Spot hinzuzufügen." : "Neuen besuchten Spot eintragen"}
+                        >
                             + Spot eintragen
                         </button>
                     )}
@@ -137,7 +149,11 @@ const Profile: React.FC<ProfileProps> = ({ userData, currentUser, userLocation, 
                             }
                         </p>
                          {activeTab === 'visited' && (
-                            <button onClick={onAddNewSpot} className="px-5 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-all">
+                            <button 
+                                onClick={onAddNewSpot} 
+                                className="px-5 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-all disabled:opacity-50"
+                                disabled={isOffline}
+                            >
                                 Ersten besuchten Spot eintragen
                             </button>
                         )}

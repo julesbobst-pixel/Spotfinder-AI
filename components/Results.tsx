@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { PhotoSpot, Coordinates, User, UserData, ImageState } from '../types';
 import SpotCard from './SpotCard';
@@ -14,10 +15,11 @@ interface ResultsProps {
   onToggleVisited: (spot: PhotoSpot) => void;
   imageStates: { [spotId: string]: ImageState };
   onLoadImage: (spotId: string, spotName: string, description: string) => void;
+  isOffline: boolean;
 }
 
 const Results: React.FC<ResultsProps> = ({ 
-  spots, userLocation, resetSearch, onRemix, currentUser, userData, onToggleFavorite, onToggleVisited, imageStates, onLoadImage 
+  spots, userLocation, resetSearch, onRemix, currentUser, userData, onToggleFavorite, onToggleVisited, imageStates, onLoadImage, isOffline
 }) => {
   const [expandedSpotId, setExpandedSpotId] = useState<string | null>(null);
 
@@ -38,7 +40,12 @@ const Results: React.FC<ResultsProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <h2 className="text-2xl font-bold sm:text-3xl">Deine Top-Spots</h2>
         <div className="flex items-center gap-2">
-          <button onClick={() => { navigator.vibrate?.(50); onRemix(); }} title="Neue Spots mit den gleichen Kriterien finden" className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all flex items-center gap-2">
+          <button 
+            onClick={() => { navigator.vibrate?.(50); onRemix(); }} 
+            title={isOffline ? "Du musst online sein für neue Vorschläge" : "Neue Spots mit den gleichen Kriterien finden"}
+            disabled={isOffline}
+            className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
               <SparklesIcon className="w-5 h-5 text-primary-400" />
               Neue Vorschläge
           </button>

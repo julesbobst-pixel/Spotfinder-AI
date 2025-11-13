@@ -5,9 +5,10 @@ import LoadingSpinner from './LoadingSpinner';
 interface AddSpotModalProps {
   onClose: () => void;
   onSave: (data: { name: string; address: string; description: string }) => Promise<void>;
+  isOffline: boolean;
 }
 
-export const AddSpotModal: React.FC<AddSpotModalProps> = ({ onClose, onSave }) => {
+export const AddSpotModal: React.FC<AddSpotModalProps> = ({ onClose, onSave, isOffline }) => {
     const [name, setName] = useState('');
     const [address, setAddress] = useState('');
     const [description, setDescription] = useState('');
@@ -87,11 +88,12 @@ export const AddSpotModal: React.FC<AddSpotModalProps> = ({ onClose, onSave }) =
                         ></textarea>
                     </div>
                     {error && <p className="text-red-400 text-center text-sm mb-4">{error}</p>}
+                    {isOffline && <p className="text-yellow-400 text-center text-sm mb-4">Du musst online sein, um einen neuen Ort zu speichern.</p>}
                     <div className="flex items-center justify-center">
                         <button
                             className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors disabled:opacity-50"
                             type="submit"
-                            disabled={isLoading}
+                            disabled={isLoading || isOffline}
                         >
                             {isLoading ? <LoadingSpinner /> : 'Spot speichern'}
                         </button>
